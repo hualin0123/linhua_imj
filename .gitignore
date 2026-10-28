@@ -1,0 +1,21 @@
+# 编译产物
+*.class
+target/
+
+# IDE配置（如果你用IDEA）
+.idea/
+*.iml
+.vscode/
+
+# 日志文件
+*.log
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+*.tif
+*.tiff
+
+# 本地项目数据（不对外）
+.codebuddy/

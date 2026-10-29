@@ -42,6 +42,9 @@ import javax.swing.SwingUtilities;
  * 直接使用 AWT/Swing 自绘，<b>不依赖</b> {@code ij.gui.Plot}，因此 ImageJ 原 Plot 窗口
  * 底部的 {@code List}/{@code Data}/{@code More} 选项卡不会出现。
  *
+ * <p>样式可通过 setter 覆盖（坐标轴字体、刻度小数位、刻度朝向、网格、边框、图例位置/字号等），
+ * 默认观感与原有 Beam Pointing 一致；M2 等模块可借此完整复刻 Matplotlib 出图格式。</p>
+ *
  * @author Hua Lin
  * @since 0.1.0
  */
@@ -51,6 +54,16 @@ public class Plot extends JPanel {
     public static final int LINE = 0;
     /** 散点序列。 */
     public static final int SCATTER = 1;
+    /** 散点标记：圆形。 */
+    public static final int MARKER_CIRCLE = 0;
+    /** 散点标记：上三角。 */
+    public static final int MARKER_TRIANGLE = 1;
+
+    /** 图例位置。 */
+    public static final int LEGEND_UPPER_LEFT = 0;
+    public static final int LEGEND_UPPER_RIGHT = 1;
+    public static final int LEGEND_LOWER_LEFT = 2;
+    public static final int LEGEND_LOWER_RIGHT = 3;
 
     /** 工具栏图标：复原（home）。 */
     private static final int ICON_HOME = 0;
@@ -72,12 +85,28 @@ public class Plot extends JPanel {
         final Color color;
         final String label;
         final int type;
+        final float lineWidth;
+        final int marker;
+        final boolean hollow;
+        final float markerSize;
+        final float markerEdge;
+
         Series(double[] x, double[] y, Color color, String label, int type) {
+            this(x, y, color, label, type, 1.6f, MARKER_CIRCLE, false, 3f, 1.2f);
+        }
+
+        Series(double[] x, double[] y, Color color, String label, int type,
+               float lineWidth, int marker, boolean hollow, float markerSize, float markerEdge) {
             this.x = x;
             this.y = y;
             this.color = color;
             this.label = label;
             this.type = type;
+            this.lineWidth = lineWidth;
+            this.marker = marker;
+            this.hollow = hollow;
+            this.markerSize = markerSize;
+            this.markerEdge = markerEdge;
         }
     }
 
@@ -89,6 +118,21 @@ public class Plot extends JPanel {
     private boolean legend = false;
     private boolean originCross = false;
     private String annotation = null;
+    private String northAnnotation = null;
+
+    // 坐标轴/字体样式（默认保持原有观感；M2 等可按需覆盖以复刻 matplotlib）
+    private Font labelFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+    private Font tickFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
+    private boolean tickBold = false;
+    private Integer xTicksDecimals = null;
+    private Integer yTicksDecimals = null;
+    private boolean ticksInward = false;
+    private boolean grid = true;
+    private boolean box = false;
+    private boolean drawTitle = true;
+    private int legendLoc = LEGEND_UPPER_LEFT;
+    private boolean legendFrame = false;
+    private float legendFontPt = 11f;
 
     // 当前坐标轴范围
     private double xMin, xMax, yMin, yMax;
@@ -97,10 +141,10 @@ public class Plot extends JPanel {
     private boolean rangeSet = false;
 
     // 边距
-    private int leftMargin = 64;
+    private int leftMargin = 70;
     private int rightMargin = 18;
     private int topMargin = 18;
-    private int bottomMargin = 50;
+    private int bottomMargin = 56;
 
     private int mode = NONE;
     private Point dragStart = null;
@@ -128,9 +172,20 @@ public class Plot extends JPanel {
         series.add(new Series(x, y, color, label, LINE));
     }
 
+    /** 添加一条线型序列（可指定线宽）。 */
+    public void addLine(double[] x, double[] y, Color color, String label, float lineWidth) {
+        series.add(new Series(x, y, color, label, LINE, lineWidth, MARKER_CIRCLE, false, 3f, 1.2f));
+    }
+
     /** 添加一组散点。 */
     public void addScatter(double[] x, double[] y, Color color, String label) {
         series.add(new Series(x, y, color, label, SCATTER));
+    }
+
+    /** 添加一组散点（可指定标记形状、空心/实心、大小与边宽）。 */
+    public void addScatter(double[] x, double[] y, Color color, String label,
+                           int marker, boolean hollow, float markerSize, float markerEdge) {
+        series.add(new Series(x, y, color, label, SCATTER, 1.6f, marker, hollow, markerSize, markerEdge));
     }
 
     /** 是否绘制图例。 */
@@ -147,6 +202,29 @@ public class Plot extends JPanel {
     public void setAnnotation(String text) {
         this.annotation = text;
     }
+
+    /** 在图形顶部中央添加一行注释（如波长 λ，对应 Python 的第二图例）。 */
+    public void setNorthAnnotation(String text) {
+        this.northAnnotation = text;
+    }
+
+    public void setFontFamily(String family) {
+        labelFont = new Font(family, labelFont.getStyle(), labelFont.getSize());
+        tickFont = new Font(family, tickFont.getStyle(), tickFont.getSize());
+    }
+
+    public void setLabelFontSize(float pt) { labelFont = labelFont.deriveFont(pt); }
+    public void setTickFontSize(float pt) { tickFont = tickFont.deriveFont(pt); }
+    public void setTickBold(boolean b) { tickBold = b; tickFont = tickFont.deriveFont(b ? Font.BOLD : Font.PLAIN); }
+    public void setXTicksDecimals(int n) { xTicksDecimals = n; }
+    public void setYTicksDecimals(int n) { yTicksDecimals = n; }
+    public void setTicksInward(boolean b) { ticksInward = b; }
+    public void setGrid(boolean b) { grid = b; }
+    public void setBox(boolean b) { box = b; }
+    public void setDrawTitle(boolean b) { drawTitle = b; }
+    public void setLegendLocation(int loc) { legendLoc = loc; }
+    public void setLegendFrame(boolean b) { legendFrame = b; }
+    public void setLegendFontSize(float pt) { legendFontPt = pt; }
 
     /** 构建 Matplotlib/Matlab 风格的工具栏（仅图标：复原 / 缩放 / 平移 / 存储图形）。 */
     private JToolBar buildToolBar() {
@@ -259,10 +337,10 @@ public class Plot extends JPanel {
     public void showPlot() {
         computeRangeIfNeeded();
         SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame(title != null ? title : "Beam Pointing");
+            JFrame frame = new JFrame(title != null ? title : "Plot");
             frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
             frame.getContentPane().add(this, BorderLayout.CENTER);
-            frame.setSize(720, 500);
+            frame.setSize(720, 540);
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);
         });
@@ -423,7 +501,13 @@ public class Plot extends JPanel {
             }
             g2.setClip(oldClip);
             if (legend) {
-                drawLegend(g2, x0, y0);
+                drawLegend(g2, x0, y0, x1, y1);
+            }
+            if (northAnnotation != null) {
+                g2.setFont(new Font(labelFont.getFamily(), Font.PLAIN, (int) legendFontPt));
+                g2.setColor(Color.BLACK);
+                int tw = g2.getFontMetrics().stringWidth(northAnnotation);
+                g2.drawString(northAnnotation, (x0 + x1) / 2 - tw / 2, y0 + 4 + g2.getFontMetrics().getAscent());
             }
             if (annotation != null) {
                 g2.setColor(Color.BLACK);
@@ -440,54 +524,70 @@ public class Plot extends JPanel {
     }
 
     private void drawAxes(Graphics2D g2, int x0, int y0, int x1, int y1) {
-        // 网格 + 刻度
-        g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 11f));
-        g2.setColor(new Color(0xDD, 0xDD, 0xDD));
-        for (double v : niceTicks(xMin, xMax, 6)) {
-            int px = toPxX(v, x0, x1);
-            g2.drawLine(px, y0, px, y1);
-        }
-        for (double v : niceTicks(yMin, yMax, 6)) {
-            int py = toPxY(v, y0, y1);
-            g2.drawLine(x0, py, x1, py);
+        int tl = 5; // 刻度线长度
+
+        // 网格
+        if (grid) {
+            g2.setFont(tickFont);
+            g2.setColor(new Color(0xDD, 0xDD, 0xDD));
+            for (double v : niceTicks(xMin, xMax, 6)) {
+                int px = toPxX(v, x0, x1);
+                g2.drawLine(px, y0, px, y1);
+            }
+            for (double v : niceTicks(yMin, yMax, 6)) {
+                int py = toPxY(v, y0, y1);
+                g2.drawLine(x0, py, x1, py);
+            }
         }
 
-        // 轴线
+        // 轴线（box: 四边；否则左+下）
         g2.setColor(Color.BLACK);
         g2.setStroke(new BasicStroke(1f));
-        g2.drawLine(x0, y0, x0, y1);
-        g2.drawLine(x0, y1, x1, y1);
+        if (box) {
+            g2.drawRect(x0, y0, x1 - x0, y1 - y0);
+        } else {
+            g2.drawLine(x0, y0, x0, y1);
+            g2.drawLine(x0, y1, x1, y1);
+        }
 
-        // 刻度数字
+        // 刻度线 + 数字
+        g2.setFont(tickFont);
         g2.setColor(Color.BLACK);
         double xStep = niceStep(xMin, xMax, 6);
         double yStep = niceStep(yMin, yMax, 6);
         for (double v : niceTicks(xMin, xMax, 6)) {
             int px = toPxX(v, x0, x1);
-            g2.drawLine(px, y1, px, y1 + 4);
-            String s = formatTick(v, xStep);
+            if (ticksInward) g2.drawLine(px, y1, px, y1 - tl);
+            else g2.drawLine(px, y1, px, y1 + tl);
+            String s = formatTick(v, xStep, xTicksDecimals);
             int tw = g2.getFontMetrics().stringWidth(s);
-            g2.drawString(s, px - tw / 2, y1 + 16);
+            g2.drawString(s, px - tw / 2, y1 + tl + 14);
         }
         for (double v : niceTicks(yMin, yMax, 6)) {
             int py = toPxY(v, y0, y1);
-            g2.drawLine(x0 - 4, py, x0, py);
-            String s = formatTick(v, yStep);
+            if (ticksInward) g2.drawLine(x0, py, x0 + tl, py);
+            else g2.drawLine(x0, py, x0 - tl, py);
+            String s = formatTick(v, yStep, yTicksDecimals);
             int tw = g2.getFontMetrics().stringWidth(s);
-            g2.drawString(s, x0 - 6 - tw, py + 4);
+            g2.drawString(s, x0 - tl - tw - 4, py + g2.getFontMetrics().getAscent() / 2);
         }
 
         // 轴标签
         if (xLabel != null) {
-            g2.drawString(xLabel, (x0 + x1) / 2 - g2.getFontMetrics().stringWidth(xLabel) / 2, y1 + 36);
+            g2.setFont(labelFont);
+            int tw = g2.getFontMetrics().stringWidth(xLabel);
+            g2.drawString(xLabel, (x0 + x1) / 2 - tw / 2,
+                    y1 + tl + 14 + 8 + (int) (labelFont.getSize() * 0.8));
         }
         if (yLabel != null) {
             Graphics2D g3 = (Graphics2D) g2.create();
+            g3.setFont(labelFont);
             g3.rotate(-Math.PI / 2);
-            g3.drawString(yLabel, -(y0 + y1) / 2 - g2.getFontMetrics().stringWidth(yLabel) / 2, 14);
+            int tw = g2.getFontMetrics().stringWidth(yLabel);
+            g3.drawString(yLabel, -(y0 + y1) / 2 - tw / 2, 16);
             g3.dispose();
         }
-        if (title != null) {
+        if (drawTitle && title != null) {
             g2.setFont(g2.getFont().deriveFont(Font.BOLD, 13f));
             g2.drawString(title, (x0 + x1) / 2 - g2.getFontMetrics().stringWidth(title) / 2, y0 - 4);
         }
@@ -497,7 +597,7 @@ public class Plot extends JPanel {
         for (Series s : series) {
             g2.setColor(s.color);
             if (s.type == LINE) {
-                g2.setStroke(new BasicStroke(1.6f));
+                g2.setStroke(new BasicStroke(s.lineWidth));
                 for (int i = 1; i < s.x.length; i++) {
                     int px0 = toPxX(s.x[i - 1], x0, x1);
                     int py0 = toPxY(s.y[i - 1], y0, y1);
@@ -506,12 +606,37 @@ public class Plot extends JPanel {
                     g2.drawLine(px0, py0, px1, py1);
                 }
             } else { // SCATTER
-                g2.setStroke(new BasicStroke(1.2f));
                 for (int i = 0; i < s.x.length; i++) {
                     int px = toPxX(s.x[i], x0, x1);
                     int py = toPxY(s.y[i], y0, y1);
-                    g2.drawOval(px - 3, py - 3, 6, 6);
+                    drawMarker(g2, px, py, s.marker, s.hollow, s.markerSize, s.color, s.markerEdge);
                 }
+            }
+        }
+    }
+
+    private void drawMarker(Graphics2D g2, int px, int py, int shape, boolean hollow,
+                            float r, Color color, float edge) {
+        int ir = (int) Math.round(r);
+        if (shape == MARKER_TRIANGLE) {
+            int[] xs = {px, px - ir, px + ir};
+            int[] ys = {py - ir, py + (int) (ir * 0.8), py + (int) (ir * 0.8)};
+            if (hollow) {
+                g2.setStroke(new BasicStroke(edge));
+                g2.setColor(color);
+                g2.drawPolygon(xs, ys, 3);
+            } else {
+                g2.setColor(color);
+                g2.fillPolygon(xs, ys, 3);
+            }
+        } else { // 圆
+            if (hollow) {
+                g2.setStroke(new BasicStroke(edge));
+                g2.setColor(color);
+                g2.drawOval(px - ir, py - ir, ir * 2, ir * 2);
+            } else {
+                g2.setColor(color);
+                g2.fillOval(px - ir, py - ir, ir * 2, ir * 2);
             }
         }
     }
@@ -530,24 +655,51 @@ public class Plot extends JPanel {
         g2.drawLine(px, toPxY(-dyData, y0, y1), px, toPxY(dyData, y0, y1));
     }
 
-    private void drawLegend(Graphics2D g2, int x0, int y0) {
-        g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 11f));
-        int lx = x0 + 10;
-        int ly = y0 + 12;
+    private void drawLegend(Graphics2D g2, int x0, int y0, int x1, int y1) {
+        Font lf = new Font(labelFont.getFamily(), Font.PLAIN, (int) legendFontPt);
+        g2.setFont(lf);
+        int lh = (int) (legendFontPt + 6);
+        int n = 0, boxW = 0;
         for (Series s : series) {
             if (s.label == null) {
                 continue;
             }
-            g2.setColor(s.color);
+            n++;
+            int tw = g2.getFontMetrics().stringWidth(s.label) + 30;
+            if (tw > boxW) {
+                boxW = tw;
+            }
+        }
+        int boxH = n * lh;
+        int ax, ay;
+        switch (legendLoc) {
+            case LEGEND_UPPER_RIGHT: ax = x1 - boxW - 10; ay = y0 + 10; break;
+            case LEGEND_LOWER_LEFT:  ax = x0 + 10; ay = y1 - boxH - 10; break;
+            case LEGEND_LOWER_RIGHT: ax = x1 - boxW - 10; ay = y1 - boxH - 10; break;
+            default:                 ax = x0 + 10; ay = y0 + 10;
+        }
+        if (legendFrame) {
+            g2.setColor(Color.WHITE);
+            g2.fillRect(ax - 4, ay - 4, boxW + 8, boxH + 8);
+            g2.setColor(Color.GRAY);
+            g2.drawRect(ax - 4, ay - 4, boxW + 8, boxH + 8);
+        }
+        int i = 0;
+        for (Series s : series) {
+            if (s.label == null) {
+                continue;
+            }
+            int cy = ay + i * lh + lh / 2;
             if (s.type == LINE) {
+                g2.setColor(s.color);
                 g2.setStroke(new BasicStroke(1.6f));
-                g2.drawLine(lx, ly, lx + 18, ly);
+                g2.drawLine(ax, cy, ax + 20, cy);
             } else {
-                g2.drawOval(lx + 6, ly - 3, 6, 6);
+                drawMarker(g2, ax + 10, cy, s.marker, s.hollow, s.markerSize, s.color, s.markerEdge);
             }
             g2.setColor(Color.BLACK);
-            g2.drawString(s.label, lx + 24, ly + 4);
-            ly += 16;
+            g2.drawString(s.label, ax + 26, ay + i * lh + (int) (lh * 0.7));
+            i++;
         }
     }
 
@@ -581,10 +733,15 @@ public class Plot extends JPanel {
         return out;
     }
 
-    private static String formatTick(double v, double step) {
-        int decimals = (int) Math.max(0, -Math.floor(Math.log10(step)));
-        decimals = Math.min(decimals, 6);
-        return String.format("%." + decimals + "f", v);
+    private static String formatTick(double v, double step, Integer decimals) {
+        int d;
+        if (decimals != null) {
+            d = decimals;
+        } else {
+            d = (int) Math.max(0, -Math.floor(Math.log10(step)));
+            d = Math.min(d, 6);
+        }
+        return String.format("%." + d + "f", v);
     }
 
     // ------------------------------------------------------------------

@@ -19,3 +19,6 @@ Thumbs.db
 
 # 本地项目数据（不对外）
 .codebuddy/
+
+# 参考用的 Python 程序（不纳入版本库）
+hs/

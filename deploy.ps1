@@ -34,7 +34,7 @@ cmd.exe /c "rmdir /s /q $out"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $srcFiles = (Get-ChildItem $srcDir -Filter *.java -Recurse).FullName
-& $javac --release 8 -cp $ij -d $out $srcFiles
+& $javac -encoding UTF-8 --release 8 -cp $ij -d $out $srcFiles
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'JAVAC_FAIL'
     exit 1

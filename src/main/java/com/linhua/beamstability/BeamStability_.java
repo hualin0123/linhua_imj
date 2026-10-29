@@ -1,7 +1,6 @@
 package com.linhua.beamstability;
 
 import ij.IJ;
-import ij.gui.Plot;
 import ij.io.OpenDialog;
 import ij.plugin.PlugIn;
 import java.awt.Color;
@@ -177,15 +176,12 @@ public class BeamStability_ implements PlugIn {
             r[i] = s.r;
         }
 
-        Plot plot = new Plot("Beam Pointing - Time Trace", "Time / s", "Offset / um");
-        plot.setColor(Color.RED);
-        plot.addPoints(t, x, Plot.LINE);
-        plot.setColor(Color.GREEN);
-        plot.addPoints(t, y, Plot.LINE);
-        plot.setColor(Color.BLUE);
-        plot.addPoints(t, r, Plot.LINE);
-        plot.draw();
-        plot.show();
+        BeamPlot plot = new BeamPlot("Beam Pointing - Time Trace", "Time / s", "Offset / um");
+        plot.addLine(t, x, Color.RED, "Offset X");
+        plot.addLine(t, y, Color.GREEN, "Offset Y");
+        plot.addLine(t, r, Color.BLUE, "Offset (combined)");
+        plot.setLegend(true);
+        plot.showPlot();
     }
 
     /** 图2：X–Y 散点分布图（含原点参考十字）。 */
@@ -193,34 +189,17 @@ public class BeamStability_ implements PlugIn {
         int n = samples.size();
         double[] x = new double[n];
         double[] y = new double[n];
-        double xmin = Double.MAX_VALUE, xmax = -Double.MAX_VALUE;
-        double ymin = Double.MAX_VALUE, ymax = -Double.MAX_VALUE;
         for (int i = 0; i < n; i++) {
             Sample s = samples.get(i);
             x[i] = s.x;
             y[i] = s.y;
-            if (s.x < xmin) xmin = s.x;
-            if (s.x > xmax) xmax = s.x;
-            if (s.y < ymin) ymin = s.y;
-            if (s.y > ymax) ymax = s.y;
         }
 
-        double padx = (xmax - xmin) * 0.1;
-        double pady = (ymax - ymin) * 0.1;
-        Plot plot = new Plot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
-        plot.setLimits(xmin - padx, xmax + padx, ymin - pady, ymax + pady);
-        plot.addPoints(x, y, Plot.CIRCLE);
-
-        // 原点参考十字（标称光束位置）
-        double d = Math.min(xmax - xmin, ymax - ymin) / 25.0;
-        plot.setColor(Color.GRAY);
-        plot.drawLine(-d, 0, d, 0);
-        plot.drawLine(0, -d, 0, d);
-
-        plot.setColor(Color.BLACK);
-        plot.addLabel(0.05, 0.95, "RMS offset \u2248 " + String.format("%.2f", rms) + " um");
-        plot.draw();
-        plot.show();
+        BeamPlot plot = new BeamPlot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
+        plot.addScatter(x, y, Color.BLUE, null);
+        plot.setOriginCross(true);
+        plot.setAnnotation("RMS offset \u2248 " + String.format("%.2f", rms) + " um");
+        plot.showPlot();
     }
 
     /** 将汇总统计与计算得到的 RMS 偏移输出到 Log 窗口。 */

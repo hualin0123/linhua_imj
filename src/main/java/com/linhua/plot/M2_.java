@@ -3,7 +3,6 @@ package com.linhua.plot;
 import com.linhua.io.XlsxReader;
 import ij.IJ;
 import ij.gui.GenericDialog;
-import ij.io.OpenDialog;
 import ij.plugin.PlugIn;
 import java.awt.Color;
 import java.io.BufferedReader;
@@ -39,12 +38,10 @@ public class M2_ implements PlugIn {
 
     @Override
     public void run(String arg) {
-        OpenDialog od = new OpenDialog("选择 M2 数据 CSV", null);
-        String path = od.getPath();
-        if (path == null) {
+        File[] files = PlotUtil.chooseFiles("选择 M2 数据 (csv/xlsx)", "csv", "xlsx", "xlsm");
+        if (files.length == 0) {
             return; // 用户取消
         }
-
         GenericDialog gd = new GenericDialog("M2 参数");
         gd.addNumericField("Wavelength (nm)", 2060, 0);
         gd.showDialog();
@@ -53,12 +50,13 @@ public class M2_ implements PlugIn {
         }
         double lambdaNm = gd.getNextNumber();
 
-        try {
-            Data d = parseFile(path);
-            if (d.n == 0) {
-                IJ.error("未从文件中解析到任何有效数据行。");
-                return;
-            }
+        for (File f : files) {
+            try {
+                Data d = parseFile(f.getAbsolutePath());
+                if (d.n == 0) {
+                    IJ.error("未从文件中解析到任何有效数据行：" + f.getName());
+                    continue;
+                }
 
             double lamMm = lambdaNm * 1e-6; // nm -> mm
 
@@ -78,17 +76,9 @@ public class M2_ implements PlugIn {
             }
 
             Plot plot = new Plot("M2 - Beam Radius vs Position", "Position (mm)", "Beam radius (mm)");
-            // 复刻 Python (matplotlib) 出图格式
-            plot.setDrawTitle(false);
-            plot.setFontFamily("Arial");
-            plot.setLabelFontSize(18f);
-            plot.setTickFontSize(16f);
-            plot.setTickBold(true);
-            plot.setXTicksDecimals(0);
-            plot.setYTicksDecimals(2);
-            plot.setTicksInward(true);
-            plot.setGrid(false);
-            plot.setBox(true);
+            // 统一格式（以 M2 的 matplotlib 风格为模板）
+            PlotUtil.applyStyle(plot, "Position (mm)", "Beam radius (mm)",
+                    0, 2, Plot.LEGEND_LOWER_RIGHT, true, false, true);
             float lw = 2.4f;   // 拟合曲线线宽 = ax_width*0.3
             float mr = 6f;     // 数据点标记半径（≈ markersize 11.2pt）
             float me = 1.5f;   // 标记边宽 = ax_width*0.15
@@ -98,22 +88,19 @@ public class M2_ implements PlugIn {
                     "Mx\u00b2 = " + String.format("%.2f", fx.m2), Plot.MARKER_CIRCLE, true, mr, me);
             plot.addScatter(d.z, d.yr, Color.BLUE,
                     "My\u00b2 = " + String.format("%.2f", fy.m2), Plot.MARKER_TRIANGLE, true, mr, me);
-            plot.setLegend(true);
-            plot.setLegendLocation(Plot.LEGEND_LOWER_RIGHT);
-            plot.setLegendFrame(false);
-            plot.setLegendFontSize(15f);
             plot.setNorthAnnotation("\u03bb = " + (int) lambdaNm + " nm");
             plot.showPlot();
 
-            IJ.log("=== M2 ===\n"
-                    + "λ = " + (int) lambdaNm + " nm\n"
-                    + "Mx² = " + String.format("%.3f", fx.m2)
-                    + "  (w0=" + String.format("%.4f", fx.w0) + " mm, z0=" + String.format("%.3f", fx.z0) + " mm)\n"
-                    + "My² = " + String.format("%.3f", fy.m2)
-                    + "  (w0=" + String.format("%.4f", fy.w0) + " mm, z0=" + String.format("%.3f", fy.z0) + " mm)");
-        } catch (Exception e) {
-            IJ.error("解析失败", e.getMessage());
-            e.printStackTrace();
+                IJ.log("=== M2 (" + f.getName() + ") ===\n"
+                        + "λ = " + (int) lambdaNm + " nm\n"
+                        + "Mx² = " + String.format("%.3f", fx.m2)
+                        + "  (w0=" + String.format("%.4f", fx.w0) + " mm, z0=" + String.format("%.3f", fx.z0) + " mm)\n"
+                        + "My² = " + String.format("%.3f", fy.m2)
+                        + "  (w0=" + String.format("%.4f", fy.w0) + " mm, z0=" + String.format("%.3f", fy.z0) + " mm)");
+            } catch (Exception e) {
+                IJ.error("解析失败: " + f.getName(), e.getMessage());
+                e.printStackTrace();
+            }
         }
     }
 

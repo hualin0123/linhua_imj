@@ -12,10 +12,31 @@ linhua_imj/
 └── src/main/
     ├── java/com/linhua/
     │   ├── plot/                # 画图模块：通用自绘图表库 + 各 Plot 类功能
-    │   │   ├── Plot.java          #   通用画图库（复原/缩放/平移/导出 PNG·SVG）
+    │   │   ├── Plot.java          #   通用画图库（复原/缩放/平移/导出 PNG·SVG，matplotlib 风格）
     │   │   ├── SvgGraphics.java    #   Graphics2D -> SVG 桥接（Plot 内部使用）
-    │   │   ├── BeamPointing_.java  #   功能：Beam Pointing（实现 ij.plugin.PlugIn）
-    │   │   └── M2_.java            #   功能：M2 光束质量因子（实现 ij.plugin.PlugIn）
+    │   │   ├── PlotUtil.java       #   配色/标记分配、刻度数字格式、统一风格应用、统一文件选择（多选对话框）
+    │   │   ├── BeamPointing_.java  #   功能：Beam Pointing 单次测量
+    │   │   ├── BeamPointingCompare_.java #   功能：Beam Pointing 多文件对比（多选对话框，按相对时间叠加，可选中心对齐；散点可选空心标记）
+    │   │   ├── BeamPointingCore.java #   共用：CSV 解析 + 数据载体（单跑与对比共用）
+    │   │   ├── M2_.java            #   功能：M2 光束质量因子
+    │   │   ├── Multiline1_.java    #   功能：多线图（同 X，多选对话框）
+    │   │   ├── Multiline2_.java    #   功能：多线图（异 X，多选对话框）
+    │   │   ├── Multifitting1_.java #   功能：多组拟合（同 X，gaussian/sech2/small_G）
+    │   │   ├── Multifitting2_.java #   功能：多组拟合（异 X）
+    │   │   ├── OutputPower_.java   #   功能：输出功率曲线
+    │   │   ├── PulseDuration_.java #   功能：脉冲时长（归一化轨迹）
+    │   │   ├── PulseDuration1_.java#   功能：脉冲时长（含 gaussian/sech2 拟合 + FWHM）
+    │   │   ├── PowerStability_.java#   功能：功率稳定性（RMS 抖动标注）
+    │   │   ├── Spectrum_.java      #   功能：光谱（min-max 归一化）
+    │   │   ├── Absorption_.java    #   功能：吸收效率/吸收功率密度 + 写回 x4、π偏+σ偏
+    │   │   └── Pabs_lnG_.java      #   功能：吸收截面/荧光寿命拟合 + 写回 Pabs/G/lnG
+    │   ├── fit/                  # 曲线拟合
+    │   │   ├── CurveFitter.java    #   通用 Levenberg–Marquardt 非线性最小二乘
+    │   │   └── Models.java         #   gaussian / sech2 / small_G / Pabs_lnG 模型
+    │   └── io/                   # 文件读写（纯 JDK，无第三方依赖）
+    │       ├── XlsxReader.java     #   极简 xlsx 读取器
+    │       ├── XlsxWriter.java     #   极简 xlsx 写出器（写回计算列）
+    │       └── Table.java          #   XlsxReader 结果的列访问封装
     │   └── <yourtool>/          # 今后新增工具：在此加子目录
     │       └── Xxx_.java
     └── resources/

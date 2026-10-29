@@ -54,10 +54,16 @@ public class Plot extends JPanel {
     public static final int LINE = 0;
     /** 散点序列。 */
     public static final int SCATTER = 1;
+    /** 数据坐标系下的填充矩形（用于密度热力图）。 */
+    public static final int RECT = 2;
     /** 散点标记：圆形。 */
     public static final int MARKER_CIRCLE = 0;
     /** 散点标记：上三角。 */
     public static final int MARKER_TRIANGLE = 1;
+    /** 散点标记：方形。 */
+    public static final int MARKER_SQUARE = 2;
+    /** 散点标记：菱形。 */
+    public static final int MARKER_DIAMOND = 3;
 
     /** 图例位置。 */
     public static final int LEGEND_UPPER_LEFT = 0;
@@ -90,9 +96,26 @@ public class Plot extends JPanel {
         final boolean hollow;
         final float markerSize;
         final float markerEdge;
+        double rw = 0, rh = 0; // RECT 类型的宽高（数据坐标）
 
         Series(double[] x, double[] y, Color color, String label, int type) {
             this(x, y, color, label, type, 1.6f, MARKER_CIRCLE, false, 3f, 1.2f);
+        }
+
+        /** RECT 专用构造：以 (x,y) 为左下角、宽 rw 高 rh（数据坐标）。 */
+        Series(double x, double y, double w, double h, Color color, int type) {
+            this.x = new double[]{x};
+            this.y = new double[]{y};
+            this.color = color;
+            this.label = null;
+            this.type = type;
+            this.lineWidth = 1.6f;
+            this.marker = MARKER_CIRCLE;
+            this.hollow = false;
+            this.markerSize = 3f;
+            this.markerEdge = 1.2f;
+            this.rw = w;
+            this.rh = h;
         }
 
         Series(double[] x, double[] y, Color color, String label, int type,
@@ -133,6 +156,7 @@ public class Plot extends JPanel {
     private int legendLoc = LEGEND_UPPER_LEFT;
     private boolean legendFrame = false;
     private float legendFontPt = 11f;
+    private Double userXMin = null, userXMax = null, userYMin = null, userYMax = null;
 
     // 当前坐标轴范围
     private double xMin, xMax, yMin, yMax;
@@ -188,6 +212,11 @@ public class Plot extends JPanel {
         series.add(new Series(x, y, color, label, SCATTER, 1.6f, marker, hollow, markerSize, markerEdge));
     }
 
+    /** 添加一个数据坐标系下的填充矩形（用于密度热力图）。(x,y)=左下角，w/h 为宽高。 */
+    public void addRect(double x, double y, double w, double h, Color c) {
+        series.add(new Series(x, y, w, h, c, RECT));
+    }
+
     /** 是否绘制图例。 */
     public void setLegend(boolean b) {
         this.legend = b;
@@ -225,6 +254,8 @@ public class Plot extends JPanel {
     public void setLegendLocation(int loc) { legendLoc = loc; }
     public void setLegendFrame(boolean b) { legendFrame = b; }
     public void setLegendFontSize(float pt) { legendFontPt = pt; }
+    public void setXLim(Double min, Double max) { userXMin = min; userXMax = max; }
+    public void setYLim(Double min, Double max) { userYMin = min; userYMax = max; }
 
     /** 构建 Matplotlib/Matlab 风格的工具栏（仅图标：复原 / 缩放 / 平移 / 存储图形）。 */
     private JToolBar buildToolBar() {
@@ -376,6 +407,10 @@ public class Plot extends JPanel {
         xMax = hxMax = maxX + dx;
         yMin = hyMin = minY - dy;
         yMax = hyMax = maxY + dy;
+        if (userXMin != null) { xMin = hxMin = userXMin; }
+        if (userXMax != null) { xMax = hxMax = userXMax; }
+        if (userYMin != null) { yMin = hyMin = userYMin; }
+        if (userYMax != null) { yMax = hyMax = userYMax; }
         rangeSet = true;
     }
 
@@ -605,6 +640,13 @@ public class Plot extends JPanel {
                     int py1 = toPxY(s.y[i], y0, y1);
                     g2.drawLine(px0, py0, px1, py1);
                 }
+            } else if (s.type == RECT) {
+                int px0 = toPxX(s.x[0], x0, x1);
+                int py1 = toPxY(s.y[0], y0, y1);
+                int px1 = toPxX(s.x[0] + s.rw, x0, x1);
+                int py0 = toPxY(s.y[0] + s.rh, y0, y1);
+                g2.setColor(s.color);
+                g2.fillRect(px0, py0, px1 - px0, py1 - py0);
             } else { // SCATTER
                 for (int i = 0; i < s.x.length; i++) {
                     int px = toPxX(s.x[i], x0, x1);
@@ -628,6 +670,26 @@ public class Plot extends JPanel {
             } else {
                 g2.setColor(color);
                 g2.fillPolygon(xs, ys, 3);
+            }
+        } else if (shape == MARKER_SQUARE) {
+            if (hollow) {
+                g2.setStroke(new BasicStroke(edge));
+                g2.setColor(color);
+                g2.drawRect(px - ir, py - ir, ir * 2, ir * 2);
+            } else {
+                g2.setColor(color);
+                g2.fillRect(px - ir, py - ir, ir * 2, ir * 2);
+            }
+        } else if (shape == MARKER_DIAMOND) {
+            int[] xs = {px, px + ir, px, px - ir};
+            int[] ys = {py - ir, py, py + ir, py};
+            if (hollow) {
+                g2.setStroke(new BasicStroke(edge));
+                g2.setColor(color);
+                g2.drawPolygon(xs, ys, 4);
+            } else {
+                g2.setColor(color);
+                g2.fillPolygon(xs, ys, 4);
             }
         } else { // 圆
             if (hollow) {

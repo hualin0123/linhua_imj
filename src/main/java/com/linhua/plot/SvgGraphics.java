@@ -1,4 +1,4 @@
-package com.linhua.beamstability;
+package com.linhua.plot;
 
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;

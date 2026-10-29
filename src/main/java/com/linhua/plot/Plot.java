@@ -1,4 +1,4 @@
-package com.linhua.beamstability;
+package com.linhua.plot;
 
 import ij.IJ;
 import java.awt.BasicStroke;
@@ -45,7 +45,7 @@ import javax.swing.SwingUtilities;
  * @author Hua Lin
  * @since 0.1.0
  */
-public class BeamPlot extends JPanel {
+public class Plot extends JPanel {
 
     /** 线型序列。 */
     public static final int LINE = 0;
@@ -114,7 +114,7 @@ public class BeamPlot extends JPanel {
      * @param xLabel X 轴标签（可为 null）
      * @param yLabel Y 轴标签（可为 null）
      */
-    public BeamPlot(String title, String xLabel, String yLabel) {
+    public Plot(String title, String xLabel, String yLabel) {
         this.title = title;
         this.xLabel = xLabel;
         this.yLabel = yLabel;

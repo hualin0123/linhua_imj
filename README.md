@@ -11,8 +11,10 @@ linhua_imj/
 ├── run.bat / run.sh             # 本地编译并运行（需 Maven）
 └── src/main/
     ├── java/com/linhua/
-    │   ├── beamstability/       # 工具：Beam Pointing（激光光束指向稳定性）
-    │   │   └── BeamStability_.java #   命令类（实现 ij.plugin.PlugIn）
+    │   ├── plot/                # 画图模块：通用自绘图表库 + 各 Plot 类功能
+    │   │   ├── Plot.java          #   通用画图库（复原/缩放/平移/导出 PNG·SVG）
+    │   │   ├── SvgGraphics.java    #   Graphics2D -> SVG 桥接（Plot 内部使用）
+    │   │   └── BeamPointing_.java  #   功能：Beam Pointing（实现 ij.plugin.PlugIn）
     │   └── <yourtool>/          # 今后新增工具：在此加子目录
     │       └── Xxx_.java
     └── resources/

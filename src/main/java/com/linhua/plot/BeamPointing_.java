@@ -1,4 +1,4 @@
-package com.linhua.beamstability;
+package com.linhua.plot;
 
 import ij.IJ;
 import ij.io.OpenDialog;
@@ -36,7 +36,7 @@ import java.util.ArrayList;
  * @author Hua Lin
  * @since 0.1.0
  */
-public class BeamStability_ implements PlugIn {
+public class BeamPointing_ implements PlugIn {
 
     /** 单个采样点。 */
     private static class Sample {
@@ -176,7 +176,7 @@ public class BeamStability_ implements PlugIn {
             r[i] = s.r;
         }
 
-        BeamPlot plot = new BeamPlot("Beam Pointing - Time Trace", "Time / s", "Offset / um");
+        Plot plot = new Plot("Beam Pointing - Time Trace", "Time / s", "Offset / um");
         plot.addLine(t, x, Color.RED, "Offset X");
         plot.addLine(t, y, Color.GREEN, "Offset Y");
         plot.addLine(t, r, Color.BLUE, "Offset (combined)");
@@ -195,7 +195,7 @@ public class BeamStability_ implements PlugIn {
             y[i] = s.y;
         }
 
-        BeamPlot plot = new BeamPlot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
+        Plot plot = new Plot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
         plot.addScatter(x, y, Color.BLUE, null);
         plot.setOriginCross(true);
         plot.setAnnotation("RMS offset \u2248 " + String.format("%.2f", rms) + " um");

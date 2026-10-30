@@ -42,7 +42,7 @@ final class SvgGraphics extends Graphics2D {
     private final int W, H;
     private Color color = Color.BLACK;
     private float stroke = 1f;
-    private Font font = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+    private Font font = new Font(PlotUtil.cjkFontFamily(), Font.PLAIN, 12);
     private AffineTransform tx = new AffineTransform();
     private Shape clip = null;
     private int clipDepth = 0;

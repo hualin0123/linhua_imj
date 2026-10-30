@@ -2,6 +2,7 @@ package com.linhua.plot;
 
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,37 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 public final class PlotUtil {
 
     private PlotUtil() { }
+
+    /**
+     * 解析一个能正常显示中文（及 μ、≈ 等符号）的字体族名。
+     * AWT 自绘（drawString）不会自动回退到 CJK 字体，而 "Arial" 等西文字体
+     * 不含中文字形，会导致中文显示为方块。此处按优先级挑选系统里第一个
+     * 能完整渲染测试串（含中文与常用符号）的字体族。
+     */
+    private static String cjkFontFamily = null;
+
+    public static String cjkFontFamily() {
+        if (cjkFontFamily != null) {
+            return cjkFontFamily;
+        }
+        String[] candidates = {
+            "Microsoft YaHei", "微软雅黑", "SimHei", "黑体",
+            "SimSun", "宋体", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+            "Noto Sans CJK SC", "Noto Sans CJK JP", "Source Han Sans SC",
+            "PingFang SC", "Arial Unicode MS", "Dialog", Font.SANS_SERIF
+        };
+        // 测试串：覆盖中文与绘图常用符号（μ、≈、°、²）
+        String test = "光束指向稳定中文μ≈°²";
+        for (String fam : candidates) {
+            Font f = new Font(fam, Font.PLAIN, 12);
+            if (f.canDisplayUpTo(test) == -1) {
+                cjkFontFamily = fam;
+                return fam;
+            }
+        }
+        cjkFontFamily = Font.SANS_SERIF;
+        return cjkFontFamily;
+    }
 
     /**
      * 统一的「多选文件对话框」：默认打开桌面，开启多选，按扩展名过滤。
@@ -140,7 +172,7 @@ public final class PlotUtil {
                                   int xDec, int yDec, int legendLoc,
                                   boolean inward, boolean grid, boolean box) {
         p.setDrawTitle(false);
-        p.setFontFamily("Arial");
+        p.setFontFamily(cjkFontFamily());
         p.setLabelFontSize(18f);
         p.setTickFontSize(16f);
         p.setTickBold(true);

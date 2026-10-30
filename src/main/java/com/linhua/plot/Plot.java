@@ -148,8 +148,8 @@ public class Plot extends JPanel {
     private String northAnnotation = null;
 
     // 坐标轴/字体样式（默认保持原有观感；M2 等可按需覆盖以复刻 matplotlib）
-    private Font labelFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
-    private Font tickFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
+    private Font labelFont = new Font(PlotUtil.cjkFontFamily(), Font.PLAIN, 12);
+    private Font tickFont = new Font(PlotUtil.cjkFontFamily(), Font.PLAIN, 11);
     private boolean tickBold = false;
     private Integer xTicksDecimals = null;
     private Integer yTicksDecimals = null;
@@ -865,9 +865,9 @@ public class Plot extends JPanel {
         FileNameExtensionFilter svgFilter = new FileNameExtensionFilter("SVG 矢量图 (*.svg)", "svg");
         fc.addChoosableFileFilter(pngFilter);
         fc.addChoosableFileFilter(svgFilter);
-        fc.setFileFilter(pngFilter);
+        fc.setFileFilter(svgFilter);
         fc.setAcceptAllFileFilterUsed(false);
-        fc.setSelectedFile(new File("BeamPointing.png"));
+        fc.setSelectedFile(new File("BeamPointing.svg"));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }

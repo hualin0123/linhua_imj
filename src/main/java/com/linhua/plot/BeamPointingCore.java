@@ -94,6 +94,39 @@ public final class BeamPointingCore {
         return new Data(samples, stats, rms);
     }
 
+    /** 质心位置偏移大小（μm）：hypot(meanX, meanY)。用于替代 CSV 中的 position 统计。 */
+    public static double positionUm(List<Sample> samples) {
+        double sx = 0, sy = 0;
+        int m = samples.size();
+        for (Sample s : samples) {
+            sx += s.x;
+            sy += s.y;
+        }
+        return Math.hypot(sx / m, sy / m);
+    }
+
+    /** 由质心位置（μm）与传播距离（mm）换算指向角（μrad）。距离 <= 0 时返回 NaN。 */
+    public static double pointingUrad(double positionUm, double distMm) {
+        return distMm > 0 ? positionUm * 1000.0 / distMm : Double.NaN;
+    }
+
+    /** 关于质心的二维 RMS 抖动（μm）：sqrt(mean((x-x̄)²+(y-ȳ)²))。即标准指向稳定性所用的空间 RMS。 */
+    public static double centroidRmsUm(List<Sample> samples) {
+        double sx = 0, sy = 0;
+        int m = samples.size();
+        for (Sample s : samples) {
+            sx += s.x;
+            sy += s.y;
+        }
+        double mx = sx / m, my = sy / m;
+        double ss = 0;
+        for (Sample s : samples) {
+            double dx = s.x - mx, dy = s.y - my;
+            ss += dx * dx + dy * dy;
+        }
+        return Math.sqrt(ss / m);
+    }
+
     /** 解析一行采样数据："日期, 时间",X,Y,偏移。 */
     private static Sample parseSample(String line) throws Exception {
         if (!line.startsWith("\"")) {

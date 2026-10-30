@@ -15,8 +15,8 @@ linhua_imj/
     │   │   ├── Plot.java          #   通用画图库（复原/缩放/平移/导出 PNG·SVG，matplotlib 风格）
     │   │   ├── SvgGraphics.java    #   Graphics2D -> SVG 桥接（Plot 内部使用）
     │   │   ├── PlotUtil.java       #   配色/标记分配、刻度数字格式、统一风格应用、统一文件选择（多选对话框）
-    │   │   ├── BeamPointing_.java  #   功能：Beam Pointing 单次测量
-    │   │   ├── BeamPointingCompare_.java #   功能：Beam Pointing 多文件对比（多选对话框，按相对时间叠加，可选中心对齐；散点可选空心标记）
+    │   │   ├── BeamPointing_.java  #   功能：Beam Pointing 单次测量（X–Y 散点标 RMS 圈；右上角可输入传播距离转 μrad）
+    │   │   ├── BeamPointingCompare_.java #   功能：Beam Pointing 多文件对比（多选对话框，按相对时间叠加，图表右上角可切换对齐中心、输入传播距离将 X/Y 转 μrad；散点半透明异形，每 run 标 RMS 圈）
     │   │   ├── BeamPointingCore.java #   共用：CSV 解析 + 数据载体（单跑与对比共用）
     │   │   ├── M2_.java            #   功能：M2 光束质量因子
     │   │   ├── Multiline1_.java    #   功能：多线图（同 X，多选对话框）
@@ -41,9 +41,54 @@ linhua_imj/
     │       └── Xxx_.java
     └── resources/
         └── plugins.config        # 菜单清单（Plugins>LinHua > ...）
-```
+    ```
 
-## 新增一个工具
+    ## 作图插件 UI 规范（Plot 风格）
+
+    所有基于 `plot/Plot.java` 自绘图表的插件，应遵循统一的界面与作图约定，保证多工具之间视觉一致、专业。
+    以下规范来自 `BeamPointing_` / `BeamPointingCompare_` 的实际实现，新作图插件请直接参考复用。
+
+    ### 1. 图标工具栏（主工具栏）
+
+    - **固定四个图标按钮**，顺序为：`复原(Home)` → `缩放(Zoom)` → `平移(Pan)` → 〔分隔线〕 → `存储图形(Save)`。
+    - 图标全部用**代码矢量绘制**（见 `Plot.makeIcon` + `drawHome/drawZoom/drawPan/drawSave`），不放图片文件；四个按钮等大同高，外观统一。
+    - 每个按钮必须配 `setToolTipText(...)`。
+    - 工具栏 `setFloatable(false)`；`Zoom/Pan` 这类开关按钮用 `Plot.setButtonSelected(b, sel)` 高亮激活态（背景 `#CFE8FF`）。
+    - 仿照 `Plot.buildToolBar()` 的实现即可。
+
+    ### 2. 选项控件放「第二条工具条」，不要挤进图标栏
+
+    - 可交互选项（如 `对齐中心` 复选框、`传播距离` 输入框）应放在**图标工具栏下方的独立一行**（`Plot.addBottomControl`，内部用 glue 右对齐），而不是塞进图标栏。
+    - 这样图标行高度不被撑高，两条工具条都是整齐单行，视觉分层清晰。
+
+    ### 3. 选项组样式（`PlotUtil.buildOptionsPanel`）
+
+    - 选项整体包在一个**单行 `JPanel`** 里，外面加一圈**灰色实线边框**（`LineBorder #999999`）+ 内边距，像一个有意为之的"控制组"，呼应左侧图标按钮的灰色边框。
+    - 子选项之间用一条 **1px 灰色竖直分隔线**（`JSeparator`，`foreground #999999`）隔开（如 `对齐中心 | 传播距离`）。
+      - ⚠️ Metal 风格下 `JSeparator` 默认宽度远大于 1px，必须强制 `setPreferredSize(1,1)` + `setMaximumSize(1, Integer.MAX_VALUE)`，否则会凭空多出空白。
+    - 间距紧凑对称：元素间用 `Box.createHorizontalStrut(4)`。
+    - **数值输入框**：宽度用**固定像素**锁死（`minimum/preferred/maximum` 三个 size 都设为同一个 `Dimension`，例如 50px），文字**右对齐**（`JTextField.RIGHT`）。
+      - 不要用 `setColumns` 做百分比/列数换算去"凑宽度"，直接定像素最可控。
+
+    ### 4. 坐标轴标题
+
+    - 格式：`Offset X / urad` 或 `Offset X / um`——**单位直接写在标题里**。
+    - 不要额外追加冗余词（如 `(pointing)`）；标题尽量短。
+
+    ### 5. 配色
+
+    - 多曲线/多 run 用 `PlotUtil.viridis(t)` 色表区分（暗紫 → 蓝绿 → 黄），颜色/标记分配走 `PlotUtil` 的共用辅助方法，不要各自硬编码。
+
+    ### 6. 指向(Beam Pointing)类指标口径（领域标准，供同类插件沿用）
+
+    - **标准孔径指向公式**：`pointing[urad] = 空间RMS[μm] × 1000 / L[mm]`，即 μm→μrad 换算系数为 `1000/L`（L 单位 mm）。
+    - `mean offset` = 质心偏移 `hypot(meanX, meanY)`（单位 μm）。
+    - **单跑 RMS 圈以质心为中心**（不是原点）。
+    - 结果用 **ImageJ 标准 `ResultsTable`** 展示：数值列在前、`File` 文字列在后（ResultsTable 惯例），数值列右对齐，支持 `Save As CSV`。
+
+    > 以上约定若后续调整，请同步更新本节，保持"规范"与代码一致。
+
+    ## 新增一个工具
 
 1. 在 `src/main/java/com/linhua/<yourtool>/` 下新建命令类，类名以 `_` 结尾、实现 `ij.plugin.PlugIn`，
    例如 `com.linhua.measure.Measure_.java`。

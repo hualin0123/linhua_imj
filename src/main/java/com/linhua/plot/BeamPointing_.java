@@ -3,8 +3,12 @@ package com.linhua.plot;
 import ij.IJ;
 import ij.plugin.PlugIn;
 import java.awt.Color;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.io.File;
 import java.util.List;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
 
 /**
  * 激光光束指向稳定性绘图插件（单次测量）。
@@ -23,6 +27,9 @@ import java.util.List;
  */
 public class BeamPointing_ implements PlugIn {
 
+    /** 当前散点图的传播距离（mm）；>0 时 X/Y 以 μrad 显示。 */
+    private double distMm = 0;
+
     /** ImageJ 插件入口。 */
     @Override
     public void run(String arg) {
@@ -34,8 +41,7 @@ public class BeamPointing_ implements PlugIn {
             try {
                 BeamPointingCore.Data d = BeamPointingCore.load(f.getAbsolutePath());
                 plotTimeTrace(d.samples);
-                plotScatter(d.samples, d.rms);
-                logStats(d.stats, d.rms);
+                plotScatter(d);
             } catch (Exception e) {
                 IJ.error("解析失败: " + f.getName(), e.getMessage());
                 e.printStackTrace();
@@ -66,37 +72,84 @@ public class BeamPointing_ implements PlugIn {
         plot.showPlot();
     }
 
-    /** 图2：X–Y 散点分布图（含原点参考十字）。 */
-    private void plotScatter(List<BeamPointingCore.Sample> samples, double rms) {
-        int n = samples.size();
-        double[] x = new double[n];
-        double[] y = new double[n];
-        for (int i = 0; i < n; i++) {
-            BeamPointingCore.Sample s = samples.get(i);
-            x[i] = s.x;
-            y[i] = s.y;
-        }
-
+    /** 图2：X–Y 散点分布图；右上角可输入传播距离将 X/Y 转为 μrad（pointing）。 */
+    private void plotScatter(BeamPointingCore.Data d) {
         Plot plot = new Plot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
         PlotUtil.applyStyle(plot, "Offset X / um", "Offset Y / um", 1, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
-        plot.addScatter(x, y, Color.BLUE, null);
-        plot.setOriginCross(true);
-        plot.setAnnotation("RMS offset \u2248 " + String.format("%.2f", rms) + " um");
+
+        JTextField distField = new JTextField(4);
+        if (distMm > 0) {
+            distField.setText(String.valueOf(distMm));
+        }
+        distField.setToolTipText("输入测量面到基准面的传播距离(mm)，回车或失焦后散点 X/Y 转为 μrad（pointing）");
+        java.util.function.DoubleSupplier readDist = () -> {
+            try {
+                double v = Double.parseDouble(distField.getText().trim());
+                return v > 0 ? v : 0;
+            } catch (Exception ex) {
+                return 0;
+            }
+        };
+        java.util.function.Consumer<Double> repaint = (dmm) -> {
+            distMm = dmm;
+            redrawScatter(plot, d);
+            printStats(d);
+        };
+        distField.addActionListener(e -> repaint.accept(readDist.getAsDouble()));
+        distField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent e) { repaint.accept(readDist.getAsDouble()); }
+        });
+        JPanel extra = PlotUtil.buildOptionsPanel(null, distField);
+        plot.addTopRightControl(extra);
+
+        redrawScatter(plot, d);
         plot.showPlot();
+        printStats(d);
     }
 
-    /** 将汇总统计与计算得到的 RMS 偏移输出到 Log 窗口。 */
-    private void logStats(List<BeamPointingCore.Stats> stats, double rms) {
-        StringBuilder sb = new StringBuilder("=== Laser Beam Pointing Stability ===\n");
-        sb.append(String.format("RMS offset (computed) = %.3f um\n", rms));
-        if (stats.isEmpty()) {
-            sb.append("(CSV 中未找到汇总统计表)\n");
+    /** 在已有 Plot 上按当前距离重绘散点（μm 或 μrad）。 */
+    private void redrawScatter(Plot plot, BeamPointingCore.Data d) {
+        List<BeamPointingCore.Sample> samples = d.samples;
+        int n = samples.size();
+        double factor = distMm > 0 ? 1000.0 / distMm : 1.0;
+        boolean urad = factor != 1.0;
+        if (urad) {
+            plot.setXLabel("Offset X / urad");
+            plot.setYLabel("Offset Y / urad");
+        } else {
+            plot.setXLabel("Offset X / um");
+            plot.setYLabel("Offset Y / um");
         }
-        for (BeamPointingCore.Stats s : stats) {
-            String name = s.axis.isEmpty() ? "Combined" : s.axis;
-            sb.append(String.format(
-                "%s: max=%.3f mean=%.3f range=%.3f std=%.3f rms=%.3f pointing=%.3f urad position=%.3f um\n",
-                name, s.max, s.mean, s.range, s.std, s.rms, s.pointing, s.position));
+        plot.clearSeriesData();
+        double[] x = new double[n], y = new double[n];
+        double sx = 0, sy = 0;
+        for (int i = 0; i < n; i++) {
+            x[i] = samples.get(i).x * factor;
+            y[i] = samples.get(i).y * factor;
+            sx += samples.get(i).x;
+            sy += samples.get(i).y;
+        }
+        double cx = sx / n, cy = sy / n;
+        double rmsUm = BeamPointingCore.centroidRmsUm(d.samples);
+        plot.addScatter(x, y, Color.BLUE, null);
+        plot.addCircle(cx * factor, cy * factor, rmsUm * factor, Color.DARK_GRAY);
+        plot.setAnnotation("RMS offset ≈ " + String.format("%.3f", rmsUm * factor) + (urad ? " urad" : " um"));
+        plot.refresh();
+    }
+
+    /** 将 RMS / position / pointing 输出到 Log（均由散点重算，pointing 需传播距离）。 */
+    private void printStats(BeamPointingCore.Data d) {
+        double posUm = BeamPointingCore.positionUm(d.samples);
+        double rmsUm = BeamPointingCore.centroidRmsUm(d.samples);
+        double pointUrad = BeamPointingCore.pointingUrad(rmsUm, distMm);
+        StringBuilder sb = new StringBuilder("=== Laser Beam Pointing Stability ===\n");
+        sb.append(String.format("RMS offset (computed) = %.3f um\n", rmsUm));
+        sb.append(String.format("Mean offset (centroid) = %.3f um\n", posUm));
+        if (Double.isNaN(pointUrad)) {
+            sb.append("pointing = -  (请在散点图右上角输入传播距离 mm)\n");
+        } else {
+            sb.append(String.format("pointing = %.3f urad\n", pointUrad));
         }
         IJ.log(sb.toString());
     }

@@ -1,10 +1,20 @@
 package com.linhua.plot;
 
 import java.awt.Color;
+import java.awt.Dimension;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JCheckBox;
 import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JSeparator;
+import javax.swing.JTextField;
+import javax.swing.SwingConstants;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 /**
@@ -161,6 +171,41 @@ public final class PlotUtil {
             return Plot.LEGEND_LOWER_RIGHT;
         }
         return Plot.LEGEND_UPPER_LEFT;
+    }
+
+    /**
+     * 构建一个单行、与工具栏图标同高的「选项」分组：
+     * 对齐中心开关（可为 null 跳过）+ 垂直分隔线 + 传播距离 输入框(mm)。
+     * 单行使高度与左侧四个图标按钮一致，避免显得突兀。
+     */
+    public static JPanel buildOptionsPanel(JCheckBox alignBox, JTextField distField) {
+        distField.setHorizontalAlignment(JTextField.RIGHT);
+        // 文本框固定宽度 50px（不依赖列数）
+        Dimension d = new Dimension(50, distField.getPreferredSize().height);
+        distField.setMinimumSize(d);
+        distField.setPreferredSize(d);
+        distField.setMaximumSize(d);
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.X_AXIS));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0x999999)),
+                BorderFactory.createEmptyBorder(2, 6, 2, 6)));
+        if (alignBox != null) {
+            panel.add(alignBox);
+            panel.add(Box.createHorizontalStrut(4));
+        }
+        JSeparator sep = new JSeparator(SwingConstants.VERTICAL);
+        sep.setForeground(new Color(0x999999));
+        sep.setPreferredSize(new Dimension(1, 1));
+        sep.setMaximumSize(new Dimension(1, Integer.MAX_VALUE));
+        panel.add(sep);
+        panel.add(Box.createHorizontalStrut(4));
+        panel.add(new JLabel("传播距离"));
+        panel.add(Box.createHorizontalStrut(4));
+        panel.add(distField);
+        panel.add(Box.createHorizontalStrut(2));
+        panel.add(new JLabel("mm"));
+        return panel;
     }
 
     /** viridis 近似（三色段线性插值）：t∈[0,1]。 */

@@ -22,12 +22,14 @@ import java.util.List;
 import javax.imageio.ImageIO;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.Box;
 import javax.swing.JToolBar;
 import javax.swing.SwingUtilities;
 
@@ -56,6 +58,8 @@ public class Plot extends JPanel {
     public static final int SCATTER = 1;
     /** 数据坐标系下的填充矩形（用于密度热力图）。 */
     public static final int RECT = 2;
+    /** 数据坐标系下的空心圆（用于 RMS 偏移圈等参考圈）。 */
+    public static final int CIRCLE = 3;
     /** 散点标记：圆形。 */
     public static final int MARKER_CIRCLE = 0;
     /** 散点标记：上三角。 */
@@ -135,8 +139,8 @@ public class Plot extends JPanel {
 
     private final List<Series> series = new ArrayList<>();
     private final String title;
-    private final String xLabel;
-    private final String yLabel;
+    private String xLabel;
+    private String yLabel;
 
     private boolean legend = false;
     private boolean originCross = false;
@@ -217,6 +221,11 @@ public class Plot extends JPanel {
         series.add(new Series(x, y, w, h, c, RECT));
     }
 
+    /** 添加一个数据坐标系下的空心圆（参考圈，如 RMS 偏移）。(cx,cy)=圆心，r=半径。 */
+    public void addCircle(double cx, double cy, double r, Color c) {
+        series.add(new Series(cx, cy, r, 0, c, CIRCLE));
+    }
+
     /** 是否绘制图例。 */
     public void setLegend(boolean b) {
         this.legend = b;
@@ -257,6 +266,11 @@ public class Plot extends JPanel {
     public void setXLim(Double min, Double max) { userXMin = min; userXMax = max; }
     public void setYLim(Double min, Double max) { userYMin = min; userYMax = max; }
 
+    /** 运行时修改 X 轴标签（如单位从 μm 切换为 μrad）。 */
+    public void setXLabel(String s) { xLabel = s; }
+    /** 运行时修改 Y 轴标签（如单位从 μm 切换为 μrad）。 */
+    public void setYLabel(String s) { yLabel = s; }
+
     /** 构建 Matplotlib/Matlab 风格的工具栏（仅图标：复原 / 缩放 / 平移 / 存储图形）。 */
     private JToolBar buildToolBar() {
         JToolBar bar = new JToolBar();
@@ -296,6 +310,7 @@ public class Plot extends JPanel {
         bar.add(panB);
         bar.addSeparator();
         bar.add(save);
+        this.toolbar = bar;
         return bar;
     }
 
@@ -359,9 +374,31 @@ public class Plot extends JPanel {
     }
 
     private JButton pan; // 占位，供 buildToolBar 内部引用
+    private JToolBar toolbar; // 构建时记住，便于追加右上角控件
 
     private void setButtonSelected(JButton b, boolean sel) {
         b.setBackground(sel ? new Color(0xCF, 0xE8, 0xFF) : null);
+    }
+
+    /** 在工具栏右端追加一个自定义控件（如“对齐中心”开关）。 */
+    public void addTopRightControl(JComponent c) {
+        if (toolbar != null) {
+            toolbar.add(Box.createHorizontalGlue());
+            toolbar.add(c);
+        }
+    }
+
+    /** 清空所有数据序列并重置坐标轴范围（供切换参数后重绘）。 */
+    public void clearSeriesData() {
+        series.clear();
+        rangeSet = false;
+        userXMin = userXMax = userYMin = userYMax = null;
+    }
+
+    /** 依据当前数据重新计算坐标轴范围并重绘（配合 {@link #clearSeriesData()} 使用）。 */
+    public void refresh() {
+        computeRangeIfNeeded();
+        canvas.repaint();
     }
 
     /** 创建并显示图形窗口（在 EDT 上构建 GUI）。 */
@@ -647,6 +684,13 @@ public class Plot extends JPanel {
                 int py0 = toPxY(s.y[0] + s.rh, y0, y1);
                 g2.setColor(s.color);
                 g2.fillRect(px0, py0, px1 - px0, py1 - py0);
+            } else if (s.type == CIRCLE) {
+                int pcx = toPxX(s.x[0], x0, x1);
+                int pcy = toPxY(s.y[0], y0, y1);
+                int prx = Math.abs(toPxX(s.x[0] + s.rw, x0, x1) - pcx);
+                int pry = Math.abs(toPxY(s.y[0] + s.rw, y0, y1) - pcy);
+                g2.setColor(s.color);
+                g2.drawOval(pcx - prx, pcy - pry, prx * 2, pry * 2);
             } else { // SCATTER
                 for (int i = 0; i < s.x.length; i++) {
                     int px = toPxX(s.x[i], x0, x1);

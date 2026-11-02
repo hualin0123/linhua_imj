@@ -652,12 +652,15 @@ public class Plot extends JPanel {
                     y1 + tl + 14 + 8 + (int) (labelFont.getSize() * 0.8));
         }
         if (yLabel != null) {
-            Graphics2D g3 = (Graphics2D) g2.create();
-            g3.setFont(labelFont);
-            g3.rotate(-Math.PI / 2);
+            // 注意：不能用 g2.create()/dispose() —— SvgGraphics.create() 返回独立的子缓冲，
+            // dispose 是空操作，子图元会丢失（导致导出 SVG 时纵坐标标签消失）。
+            // 改用显式保存/恢复变换，对屏幕与 SVG 渲染都正确。
+            java.awt.geom.AffineTransform savedTx = g2.getTransform();
+            g2.setFont(labelFont);
+            g2.rotate(-Math.PI / 2);
             int tw = g2.getFontMetrics().stringWidth(yLabel);
-            g3.drawString(yLabel, -(y0 + y1) / 2 - tw / 2, 16);
-            g3.dispose();
+            g2.drawString(yLabel, -(y0 + y1) / 2 - tw / 2, 16);
+            g2.setTransform(savedTx);
         }
         if (drawTitle && title != null) {
             g2.setFont(g2.getFont().deriveFont(Font.BOLD, 13f));
@@ -867,7 +870,7 @@ public class Plot extends JPanel {
         fc.addChoosableFileFilter(svgFilter);
         fc.setFileFilter(svgFilter);
         fc.setAcceptAllFileFilterUsed(false);
-        fc.setSelectedFile(new File("BeamPointing.svg"));
+        fc.setSelectedFile(new File("BeamPointing"));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }

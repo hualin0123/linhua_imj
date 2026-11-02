@@ -1,4 +1,6 @@
-$root    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $PSCommandPath
+if (-not $root) { $root = $PSScriptRoot }
+if (-not $root) { $root = (Get-Location).Path }
 $ij      = 'C:\Users\hual\ij154-win-java8\ImageJ\ij.jar'
 $srcDir  = "$root\src\main\java"
 $resDir  = "$root\src\main\resources"
@@ -30,15 +32,44 @@ if (Test-Path $cfg) {
     Write-Host 'WARN: plugins.config not found, skip format check'
 }
 
-cmd.exe /c "rmdir /s /q $out"
+# Clean build dir (use PowerShell native cmdlet, not cmd.exe /c rmdir)
+if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
+# Build the source list and write it to a javac @file.
+# Two non-obvious gotchas when running via "powershell -File deploy.ps1":
+#  (a) passing a PowerShell array of source paths directly to javac drops the args,
+#      so we feed the list through javac's @file mechanism instead;
+#  (b) javac's stdout/stderr must be drained through a pipeline, otherwise in the
+#      non-interactive -File context javac exits 0 but produces NO .class files
+#      (which previously produced an empty jar -> ClassNotFoundException in ImageJ).
 $srcFiles = (Get-ChildItem $srcDir -Filter *.java -Recurse).FullName
-& $javac -encoding UTF-8 --release 8 -cp $ij -d $out $srcFiles
-if ($LASTEXITCODE -ne 0) {
-    Write-Host 'JAVAC_FAIL'
+if ($srcFiles -eq $null -or $srcFiles.Count -eq 0) {
+    Write-Host "ERROR: no .java sources found under $srcDir"
     exit 1
 }
+$srcList = Join-Path $root 'target\sources.txt'
+[System.IO.File]::WriteAllLines($srcList, $srcFiles)
+# Force a read-back so the @file is guaranteed flushed to disk before javac reads it
+[System.IO.File]::ReadAllLines($srcList) | Out-Null
+
+# --release 8 is correct for targeting ImageJ's Java 8 runtime.
+# Newer JDKs emit a deprecation warning for target 8; -Xlint:-options silences that
+# advisory so it cannot be turned into a hard error later.
+$javacOut = & $javac -encoding UTF-8 -Xlint:-options --release 8 -cp $ij -d $out "@$srcList" 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'JAVAC_FAIL'
+    Write-Host $javacOut
+    exit 1
+}
+# Defensive: ensure classes were actually produced, otherwise the jar would package an
+# empty directory and ImageJ would throw ClassNotFoundException.
+$classCount = @(Get-ChildItem $out -Recurse -Filter *.class).Count
+if ($classCount -eq 0) {
+    Write-Host "ERROR: javac produced no .class files (count=0), abort packaging"
+    exit 1
+}
+Remove-Item $srcList -ErrorAction SilentlyContinue
 
 if (Test-Path $resDir) {
     Copy-Item "$resDir\*" $out -Recurse -Force
@@ -46,4 +77,4 @@ if (Test-Path $resDir) {
 
 & $jarTool cf $jar -C $out .
 Copy-Item $jar $plugins -Force
-Write-Host "Deployed: $jar -> $plugins"
+Write-Host "Deployed: $jar -> $plugins (classes=$classCount)"

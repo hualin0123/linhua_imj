@@ -135,6 +135,25 @@ powershell -ExecutionPolicy Bypass -File deploy.ps1
 脚本会自动完成上述 1–4 步（使用独立干净目录 `target\build`，避免混入旧 class），
 并把 jar 覆盖部署到 plugins 目录。
 
+> ⚠️ **deploy.ps1 脚本踩过的坑（务必照此维护，否则要么脚本直接解析失败，要么部署出的 jar 是空的）**：
+> 这些经验来自一次真实事故——`deploy.ps1` 跑完显示「Deployed」成功，但 ImageJ 启动却报
+> `ClassNotFoundException: com.linhua.plot.BeamPointingCompare_`，排查发现 jar 里**根本没有 `.class` 文件**。根因全部出在
+> `powershell -File deploy.ps1` 这种非交互运行方式上，已固化为脚本内的防御代码，改动时请勿回头：
+> 1. **注释只用 ASCII（英文）**：PowerShell 按系统 ANSI 代码页解析 `.ps1`，一旦写进中文等非 ASCII 注释，
+>    UTF-8 字节会被错位解释，偶尔某个字节被当成字符串终结符 `"`，导致整脚本
+>    `The string is missing the terminator` 解析失败。原始脚本因此全程用英文注释。若必须写中文，文件须存为
+>    **UTF-8 with BOM**，否则照样乱码。
+> 2. **`javac` 的输出必须走管道排出**：非交互 `-File` 下，若 javac 的 stdout/stderr 不被消费，它会
+>    **静默 `exit 0` 却不产出任何 `.class`**，最终打成空 jar。调用须写成
+>    `& $javac ... 2>&1 | Out-String`（或 `| Out-Null`），**不要裸调用** `& $javac ...`。
+> 3. **源码清单用 javac `@文件` 传入**：非交互 `-File` 上下文中，把 PowerShell 数组直接展开给 `javac`
+>    （即 `& javac ... $srcFiles`）会丢参数；应把源路径逐行写入一个临时 `@文件`，再以 `@清单` 传参。
+>    写入用 `[IO.File]::WriteAllLines`（确保落盘），不要在写完后立刻让 javac 读尚未刷新的文件。
+> 4. **脚本目录用 `$PSCommandPath` 或 `$MyInvocation.MyCommand.Path` 解析**，比 `$PSScriptRoot` 在
+>    `-File` 下更可靠；并加回退，避免目录解析为空导致后续所有路径失效。
+> 5. **打包前校验 class 数量**：编译后检查 `target\build` 下 `.class` 个数，为 0 直接中止，
+>    这是上述坑的最后一道兜底防线，防止默默打包空目录。
+
 ## 本地运行（可选）
 
 ```bat

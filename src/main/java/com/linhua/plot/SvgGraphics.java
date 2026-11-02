@@ -71,6 +71,12 @@ final class SvgGraphics extends Graphics2D {
         return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
     }
 
+    /** 颜色自带的 Alpha（透明度）。仅当非完全不透明时输出 opacity 属性，避免污染普通图元。 */
+    private String opacityAttr() {
+        int a = color.getAlpha();
+        return a >= 255 ? "" : String.format(" opacity=\"%.3f\"", a / 255.0);
+    }
+
     private static String fmt(double v) {
         return String.format("%.2f", v);
     }
@@ -157,7 +163,9 @@ final class SvgGraphics extends Graphics2D {
         double[] a = t(x1, y1), b = t(x2, y2);
         sb.append("<line x1=\"").append(fmt(a[0])).append("\" y1=\"").append(fmt(a[1]))
           .append("\" x2=\"").append(fmt(b[0])).append("\" y2=\"").append(fmt(b[1]))
-          .append("\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"/>\n");
+          .append("\" stroke=\"").append(rgb(color)).append("\"")
+          .append(" stroke-width=\"").append(fmt(stroke)).append("\"")
+          .append(opacityAttr()).append("/>\n");
     }
 
     @Override public void fillRect(int x, int y, int w, int h) { rect(x, y, w, h, true); }
@@ -236,12 +244,14 @@ final class SvgGraphics extends Graphics2D {
         if (fill) {
             sb.append("<rect x=\"").append(fmt(xa)).append("\" y=\"").append(fmt(ya))
               .append("\" width=\"").append(fmt(xb - xa)).append("\" height=\"").append(fmt(yb - ya))
-              .append("\" fill=\"").append(rgb(color)).append("\"/>\n");
+              .append("\" fill=\"").append(rgb(color)).append("\"")
+              .append(opacityAttr()).append("/>\n");
         } else {
             sb.append("<rect x=\"").append(fmt(xa)).append("\" y=\"").append(fmt(ya))
               .append("\" width=\"").append(fmt(xb - xa)).append("\" height=\"").append(fmt(yb - ya))
               .append("\" fill=\"none\" stroke=\"").append(rgb(color))
-              .append("\" stroke-width=\"").append(fmt(stroke)).append("\"/>\n");
+              .append("\" stroke-width=\"").append(fmt(stroke)).append("\"")
+              .append(opacityAttr()).append("/>\n");
         }
     }
 
@@ -253,12 +263,14 @@ final class SvgGraphics extends Graphics2D {
         if (fill) {
             sb.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
               .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry))
-              .append("\" fill=\"").append(rgb(color)).append("\"/>\n");
+              .append("\" fill=\"").append(rgb(color)).append("\"")
+              .append(opacityAttr()).append("/>\n");
         } else {
             sb.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
               .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry))
               .append("\" fill=\"none\" stroke=\"").append(rgb(color))
-              .append("\" stroke-width=\"").append(fmt(stroke)).append("\"/>\n");
+              .append("\" stroke-width=\"").append(fmt(stroke)).append("\"")
+              .append(opacityAttr()).append("/>\n");
         }
     }
 
@@ -269,8 +281,8 @@ final class SvgGraphics extends Graphics2D {
             sb.append(fmt(p[0])).append(',').append(fmt(p[1])).append(' ');
         }
         sb.append("\" ");
-        if (fill) sb.append("fill=\"").append(rgb(color)).append("\"/>\n");
-        else sb.append("fill=\"none\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"/>\n");
+        if (fill) sb.append("fill=\"").append(rgb(color)).append("\"").append(opacityAttr()).append("/>\n");
+        else sb.append("fill=\"none\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"").append(opacityAttr()).append("/>\n");
     }
 
     private void text(String s, double x, double y) {
@@ -279,13 +291,15 @@ final class SvgGraphics extends Graphics2D {
         if (Math.abs(deg) > 0.01) {
             sb.append("<text x=\"").append(fmt(p[0])).append("\" y=\"").append(fmt(p[1]))
               .append("\" font-size=\"").append(font.getSize())
-              .append("\" fill=\"").append(rgb(color))
-              .append("\" transform=\"rotate(").append(fmt(deg)).append(' ').append(fmt(p[0])).append(' ').append(fmt(p[1]))
+              .append("\" fill=\"").append(rgb(color)).append("\"")
+              .append(opacityAttr())
+              .append(" transform=\"rotate(").append(fmt(deg)).append(' ').append(fmt(p[0])).append(' ').append(fmt(p[1]))
               .append(")\">").append(esc(s)).append("</text>\n");
         } else {
             sb.append("<text x=\"").append(fmt(p[0])).append("\" y=\"").append(fmt(p[1]))
               .append("\" font-size=\"").append(font.getSize())
-              .append("\" fill=\"").append(rgb(color)).append("\">").append(esc(s)).append("</text>\n");
+              .append("\" fill=\"").append(rgb(color)).append("\"")
+              .append(opacityAttr()).append(">").append(esc(s)).append("</text>\n");
         }
     }
 

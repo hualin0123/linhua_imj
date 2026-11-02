@@ -5,6 +5,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -104,6 +105,86 @@ public final class PlotUtil {
             }
         }
         return keep.toArray(new File[0]);
+    }
+
+    /**
+     * 按「文件夹 + 关键词」批量筛选文件（适合文件很多、手动多选不便时，复刻 Python 端批处理）。
+     * 关键词对文件名（小写）做“包含”匹配，支持逗号/空格分隔的多个关键词（OR 关系）；
+     * 为空或 null 表示不过滤（仅按扩展名）。命中结果按文件名排序。
+     *
+     * @param folder    待扫描文件夹
+     * @param keyword   关键词（可为 null/空）
+     * @param recursive 是否递归进入子文件夹
+     * @param exts      允许的扩展名（如 "csv"）；为空则不限扩展名
+     * @return 命中的文件数组；folder 无效时返回空数组
+     */
+    public static File[] chooseByFolder(File folder, String keyword, boolean recursive, String... exts) {
+        if (folder == null || !folder.isDirectory()) {
+            return new File[0];
+        }
+        String[] kws = null;
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            kws = keyword.toLowerCase().split("[,\\s]+");
+        }
+        List<File> candidates = new ArrayList<>();
+        if (recursive) {
+            collectRecursive(folder, candidates);
+        } else {
+            File[] fs = folder.listFiles();
+            if (fs != null) {
+                for (File f : fs) {
+                    if (f.isFile()) {
+                        candidates.add(f);
+                    }
+                }
+            }
+        }
+        List<File> result = new ArrayList<>();
+        for (File f : candidates) {
+            String name = f.getName().toLowerCase();
+            if (exts != null && exts.length > 0) {
+                boolean ok = false;
+                for (String e : exts) {
+                    if (name.endsWith("." + e.toLowerCase())) {
+                        ok = true;
+                        break;
+                    }
+                }
+                if (!ok) {
+                    continue;
+                }
+            }
+            if (kws != null) {
+                boolean hit = false;
+                for (String k : kws) {
+                    if (!k.isEmpty() && name.contains(k)) {
+                        hit = true;
+                        break;
+                    }
+                }
+                if (!hit) {
+                    continue;
+                }
+            }
+            result.add(f);
+        }
+        result.sort(Comparator.comparing(File::getName));
+        return result.toArray(new File[0]);
+    }
+
+    /** 递归收集目录下的所有普通文件。 */
+    private static void collectRecursive(File dir, List<File> out) {
+        File[] fs = dir.listFiles();
+        if (fs == null) {
+            return;
+        }
+        for (File f : fs) {
+            if (f.isDirectory()) {
+                collectRecursive(f, out);
+            } else {
+                out.add(f);
+            }
+        }
     }
 
     /**

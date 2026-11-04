@@ -362,7 +362,11 @@ public class BeamPointingCompare_ implements PlugIn {
                 y[k] = (align ? s.get(k).y - ymean[i] : s.get(k).y) * factor;
             }
             int shape = SHAPES[i % SHAPES.length];
-            p.addScatter(x, y, withAlpha(colors[i], 70), names.get(i), shape, false, 4f, 1f);
+            // 图例后缀：随当前单位动态显示 RMS 抖动值（与 RMS 圈半径一致），μrad 模式才是真正指向角。
+            double rmsVal = crms[i] * factor;
+            String unit = (factor != 1.0) ? "urad" : "um";
+            String label = names.get(i) + String.format(" (%.1f %s)", rmsVal, unit);
+            p.addScatter(x, y, withAlpha(colors[i], 70), label, shape, false, 4f, 1f);
         }
         // RMS 圈置于最上层（在所有散点之后绘制）
         for (int i = 0; i < n; i++) {

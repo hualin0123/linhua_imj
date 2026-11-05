@@ -2,6 +2,7 @@ package com.linhua.plot;
 
 import ij.IJ;
 import ij.plugin.PlugIn;
+import ij.text.TextWindow;
 import java.awt.Color;
 import java.io.File;
 import java.util.ArrayList;
@@ -44,7 +45,9 @@ public class BeamPointingDiff_ implements PlugIn {
     private double[] diffDx, diffDy, diffD, tg;                 // 差分分量/合成/时间网格(μm)
     private double kX, kY;                                      // 增益匹配系数
     private BeamPointingCore.Data refData, measData;             // 留存供 Log 复用
+    private String measName;                                    // 测量臂(含被测器件)CSV 名(去扩展名)，用于图例
     private Plot diffScatterPlot;                               // 图2(用于重绘)
+    private static TextWindow diffLogWnd;                       // 差分统计输出窗口(标题=Beam Pointing Differential)
 
     @Override
     public void run(String arg) {
@@ -59,11 +62,20 @@ public class BeamPointingDiff_ implements PlugIn {
         try {
             refData = BeamPointingCore.load(refFiles[0].getAbsolutePath());
             measData = BeamPointingCore.load(measFiles[0].getAbsolutePath());
+            measName = stripExt(measFiles[0].getName());
             process(refData, measData);
         } catch (Exception e) {
             IJ.error("处理失败", e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    private static String stripExt(String n) {
+        int d = n.lastIndexOf('.');
+        if (d > 0 && n.substring(d).equalsIgnoreCase(".csv")) {
+            return n.substring(0, d);
+        }
+        return n;
     }
 
     private void process(BeamPointingCore.Data ref, BeamPointingCore.Data meas) {
@@ -194,9 +206,10 @@ public class BeamPointingDiff_ implements PlugIn {
         }
         double cx = sx / n, cy = sy / n;
         double rmsUm = BeamPointingCore.centroidRmsUm(diffSamples);
-        diffScatterPlot.addScatter(x, y, Color.BLUE, null);
-        diffScatterPlot.addCircle(cx, cy, rmsUm * factor, Color.DARK_GRAY);
-        diffScatterPlot.setAnnotation("RMS offset ≈ " + String.format("%.3f", rmsUm * factor) + (urad ? " urad" : " um"));
+        String unit = urad ? "urad" : "um";
+        String label = measName + "(校准)" + String.format(" (%.1f %s)", rmsUm * factor, unit);
+        diffScatterPlot.addScatter(x, y, Color.BLUE, label, Plot.MARKER_CIRCLE, true, 4f, 1f);
+        diffScatterPlot.addCircle(cx, cy, rmsUm * factor, Color.BLUE);
         diffScatterPlot.refresh();
     }
 
@@ -220,7 +233,14 @@ public class BeamPointingDiff_ implements PlugIn {
             sb.append(String.format("共模抑制 残余/原 = %.3f  (下降 %.1f%%)\n",
                     rmsUm / rmsMeas, (1 - rmsUm / rmsMeas) * 100));
         }
-        IJ.log(sb.toString());
+        // 输出到标题为 "Beam Pointing Differential" 的窗口（与菜单名呼应，带显微镜图标），复用同一窗口避免堆叠
+        if (diffLogWnd == null || !diffLogWnd.isShowing()) {
+            diffLogWnd = new TextWindow("Beam Pointing Differential", sb.toString(), 600, 320);
+        } else {
+            diffLogWnd.getTextPanel().clear();
+            diffLogWnd.getTextPanel().append(sb.toString());
+            diffLogWnd.toFront();
+        }
     }
 
     // ===================== 数组工具 =====================

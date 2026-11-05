@@ -2,6 +2,7 @@ package com.linhua.plot;
 
 import ij.IJ;
 import ij.plugin.PlugIn;
+import ij.text.TextWindow;
 import java.awt.Color;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
@@ -30,6 +31,9 @@ public class BeamPointing_ implements PlugIn {
     /** 当前散点图的传播距离（mm）；>0 时 X/Y 以 μrad 显示。 */
     private double distMm = 0;
 
+    /** 统计输出窗口(标题=Beam Pointing)，复用同一窗口避免堆叠。 */
+    private static TextWindow bpLogWnd;
+
     /** ImageJ 插件入口。 */
     @Override
     public void run(String arg) {
@@ -41,7 +45,7 @@ public class BeamPointing_ implements PlugIn {
             try {
                 BeamPointingCore.Data d = BeamPointingCore.load(f.getAbsolutePath());
                 plotTimeTrace(d.samples);
-                plotScatter(d);
+                plotScatter(d, f.getName());
             } catch (Exception e) {
                 IJ.error("解析失败: " + f.getName(), e.getMessage());
                 e.printStackTrace();
@@ -73,7 +77,7 @@ public class BeamPointing_ implements PlugIn {
     }
 
     /** 图2：X–Y 散点分布图；右上角可输入传播距离将 X/Y 转为 μrad（pointing）。 */
-    private void plotScatter(BeamPointingCore.Data d) {
+    private void plotScatter(BeamPointingCore.Data d, String srcName) {
         Plot plot = new Plot("Beam Pointing - X-Y Scatter", "Offset X / um", "Offset Y / um");
         PlotUtil.applyStyle(plot, "Offset X / um", "Offset Y / um", 1, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
 
@@ -92,7 +96,7 @@ public class BeamPointing_ implements PlugIn {
         };
         java.util.function.Consumer<Double> repaint = (dmm) -> {
             distMm = dmm;
-            redrawScatter(plot, d);
+            redrawScatter(plot, d, srcName);
             printStats(d);
         };
         distField.addActionListener(e -> repaint.accept(readDist.getAsDouble()));
@@ -103,13 +107,13 @@ public class BeamPointing_ implements PlugIn {
         JPanel extra = PlotUtil.buildOptionsPanel(null, distField);
         plot.addTopRightControl(extra);
 
-        redrawScatter(plot, d);
+        redrawScatter(plot, d, srcName);
         plot.showPlot();
         printStats(d);
     }
 
     /** 在已有 Plot 上按当前距离重绘散点（μm 或 μrad）。 */
-    private void redrawScatter(Plot plot, BeamPointingCore.Data d) {
+    private void redrawScatter(Plot plot, BeamPointingCore.Data d, String srcName) {
         List<BeamPointingCore.Sample> samples = d.samples;
         int n = samples.size();
         double factor = distMm > 0 ? 1000.0 / distMm : 1.0;
@@ -132,9 +136,11 @@ public class BeamPointing_ implements PlugIn {
         }
         double cx = sx / n, cy = sy / n;
         double rmsUm = BeamPointingCore.centroidRmsUm(d.samples);
-        plot.addScatter(x, y, Color.BLUE, null);
-        plot.addCircle(cx * factor, cy * factor, rmsUm * factor, Color.DARK_GRAY);
-        plot.setAnnotation("RMS offset ≈ " + String.format("%.3f", rmsUm * factor) + (urad ? " urad" : " um"));
+        String base = srcName.replaceAll("(?i)\\.csv$", "");
+        String unit = urad ? "urad" : "um";
+        String label = base + String.format(" (%.1f %s)", rmsUm * factor, unit);
+        plot.addScatter(x, y, Color.BLUE, label, Plot.MARKER_CIRCLE, true, 4f, 1f);
+        plot.addCircle(cx * factor, cy * factor, rmsUm * factor, Color.BLUE);
         plot.refresh();
     }
 
@@ -151,6 +157,13 @@ public class BeamPointing_ implements PlugIn {
         } else {
             sb.append(String.format("pointing = %.3f urad\n", pointUrad));
         }
-        IJ.log(sb.toString());
+        // 输出到标题为 "Beam Pointing" 的窗口（与菜单名呼应，带显微镜图标），复用同一窗口避免堆叠
+        if (bpLogWnd == null || !bpLogWnd.isShowing()) {
+            bpLogWnd = new TextWindow("Beam Pointing", sb.toString(), 600, 320);
+        } else {
+            bpLogWnd.getTextPanel().clear();
+            bpLogWnd.getTextPanel().append(sb.toString());
+            bpLogWnd.toFront();
+        }
     }
 }

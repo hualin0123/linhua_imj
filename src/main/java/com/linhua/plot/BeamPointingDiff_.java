@@ -41,13 +41,18 @@ import java.util.function.DoubleSupplier;
 public class BeamPointingDiff_ implements PlugIn {
 
     private double distMm = 0;                                  // 传播距离(mm)，>0 时散点显示 μrad
-    private List<BeamPointingCore.Sample> diffSamples;           // 差分结果(已去均值)
+    private List<BeamPointingCore.Sample> diffSamples;           // 差分结果(全网格，缺口为 NaN)
+    private List<BeamPointingCore.Sample> validSamples;          // 差分有效点(两臂均有真实数据，供统计/散点)
     private double[] diffDx, diffDy, diffD, tg;                 // 差分分量/合成/时间网格(μm)
     private double kX, kY;                                      // 增益匹配系数
     private BeamPointingCore.Data refData, measData;             // 留存供 Log 复用
     private String measName;                                    // 测量臂(含被测器件)CSV 名(去扩展名)，用于图例
     private Plot diffScatterPlot;                               // 图2(用于重绘)
     private static TextWindow diffLogWnd;                       // 差分统计输出窗口(标题=Beam Pointing Differential)
+    private static final double ALIGN_TOL = 1e-3;               // 时长差小于该值(s)视为一致，不裁剪
+    private static final double GAP_FACTOR = 3.0;               // 相邻采样间隔超 名义步长×该值 即判定为缺失段(缺口)
+    private String refName;                                    // 参考臂(无器件)CSV 名(去扩展名)，用于日志
+    private String alignNote = "";                             // 时间对齐裁剪说明(非空时写入 Log)
 
     @Override
     public void run(String arg) {
@@ -63,6 +68,7 @@ public class BeamPointingDiff_ implements PlugIn {
             refData = BeamPointingCore.load(refFiles[0].getAbsolutePath());
             measData = BeamPointingCore.load(measFiles[0].getAbsolutePath());
             measName = stripExt(measFiles[0].getName());
+            refName = stripExt(refFiles[0].getName());
             process(refData, measData);
         } catch (Exception e) {
             IJ.error("处理失败", e.getMessage());
@@ -79,46 +85,104 @@ public class BeamPointingDiff_ implements PlugIn {
     }
 
     private void process(BeamPointingCore.Data ref, BeamPointingCore.Data meas) {
+        // ---- 时间对齐：检测两文件测试时长是否一致，不一致则自动裁剪较长的文件 ----
+        double rt0 = ref.samples.get(0).t, rt1 = ref.samples.get(ref.samples.size() - 1).t;
+        double mt0 = meas.samples.get(0).t, mt1 = meas.samples.get(meas.samples.size() - 1).t;
+        double durRef = rt1 - rt0, durMeas = mt1 - mt0;
+        double t0 = Math.max(rt0, mt0);
+        double t1 = Math.min(rt1, mt1);
+        alignNote = "";
+        if (Math.abs(durRef - durMeas) > ALIGN_TOL) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format(
+                    "【时间对齐】两文件测试时长不一致，已自动将较长的文件裁剪到共同时间区间 [%.2f, %.2f] s（重叠 %.2f s）\n",
+                    t0, t1, t1 - t0));
+            if (durRef > durMeas) {
+                int before = ref.samples.size();
+                ref = trimToRange(ref, t0, t1);
+                sb.append(String.format(
+                        "  参考臂 %s: %.2f s (%d 点) → 裁剪为 %.2f s (%d 点)，丢弃 %.2f s / %d 点\n",
+                        refName, durRef, before, t1 - t0, ref.samples.size(),
+                        durRef - (t1 - t0), before - ref.samples.size()));
+            } else {
+                int before = meas.samples.size();
+                meas = trimToRange(meas, t0, t1);
+                sb.append(String.format(
+                        "  测量臂 %s: %.2f s (%d 点) → 裁剪为 %.2f s (%d 点)，丢弃 %.2f s / %d 点\n",
+                        measName, durMeas, before, t1 - t0, meas.samples.size(),
+                        durMeas - (t1 - t0), before - meas.samples.size()));
+            }
+            alignNote = sb.toString();
+        }
+        // 留存(可能已裁剪)的数据供 stats 复用
+        refData = ref;
+        measData = meas;
+
         double[] rt = toArr(ref.samples, 0), rx = toArr(ref.samples, 1), ry = toArr(ref.samples, 2);
         double[] mt = toArr(meas.samples, 0), mx = toArr(meas.samples, 1), my = toArr(meas.samples, 2);
 
-        // 共同时间网格：两路时间交集，步长取两者较小名义间隔(吸收时钟 skew)
-        double t0 = Math.max(rt[0], mt[0]);
-        double t1 = Math.min(rt[rt.length - 1], mt[mt.length - 1]);
+        // 共同时间网格：两路时间交集，步长取两者较小的"名义间隔"(忽略缺口段，吸收时钟 skew)
         if (t1 <= t0) {
             IJ.error("两文件时间不重叠，请确认所选 CSV 内容");
             return;
         }
-        double dt = Math.min(meanDt(rt), meanDt(mt));
+        double stepR = nominalStep(rt, GAP_FACTOR), stepM = nominalStep(mt, GAP_FACTOR);
+        double dt = Math.min(stepR, stepM);
         int ng = (int) Math.floor((t1 - t0) / dt) + 1;
         tg = new double[ng];
         for (int i = 0; i < ng; i++) {
             tg[i] = t0 + i * dt;
         }
 
-        // 重采样到统一网格(线性插值；吸收固定 lag 与时钟 skew)
-        double[] rgx = resample(rt, rx, tg), rgy = resample(rt, ry, tg);
-        double[] mgx = resample(mt, mx, tg), mgy = resample(mt, my, tg);
+        // 重采样到统一网格；缺口段(相邻采样间隔超阈值)置 NaN，绝不插值伪造
+        double gapR = GAP_FACTOR * stepR, gapM = GAP_FACTOR * stepM;
+        double[] rgx = resample(rt, rx, tg, gapR), rgy = resample(rt, ry, tg, gapR);
+        double[] mgx = resample(mt, mx, tg, gapM), mgy = resample(mt, my, tg, gapM);
 
-        // 增益匹配(各轴独立，去均值后最小二乘 k=<r,m>/<r,r>)
-        double[] rgxm = subMean(rgx), rgym = subMean(rgy);
-        double[] mgxm = subMean(mgx), mgym = subMean(mgy);
-        kX = dot(rgxm, mgxm) / dot(rgxm, rgxm);
-        kY = dot(rgym, mgym) / dot(rgym, rgym);
-        if (kX < 0 || kY < 0 || kX > 2 || kY > 2) {
-            IJ.log("⚠ 增益异常(kX=" + kX + ", kY=" + kY + ")，请检查两臂光路极性是否一致。");
+        // 增益匹配(各轴独立，去均值后最小二乘 k=<r,m>/<r,r>)；均值/点积均跳过缺口 NaN
+        double mRx = meanValid(rgx), mRy = meanValid(rgy);
+        double mMx = meanValid(mgx), mMy = meanValid(mgy);
+        double[] rgxm = new double[ng], rgym = new double[ng];
+        double[] mgxm = new double[ng], mgym = new double[ng];
+        for (int i = 0; i < ng; i++) {
+            boolean rOk = !Double.isNaN(rgx[i]) && !Double.isNaN(rgy[i]);
+            boolean mOk = !Double.isNaN(mgx[i]) && !Double.isNaN(mgy[i]);
+            rgxm[i] = rOk ? rgx[i] - mRx : Double.NaN;
+            rgym[i] = rOk ? rgy[i] - mRy : Double.NaN;
+            mgxm[i] = mOk ? mgx[i] - mMx : Double.NaN;
+            mgym[i] = mOk ? mgy[i] - mMy : Double.NaN;
+        }
+        kX = dotValid(rgxm, mgxm) / dotValid(rgxm, rgxm);
+        kY = dotValid(rgym, mgym) / dotValid(rgym, rgym);
+        if (!Double.isFinite(kX) || kX < 0 || kX > 2) {
+            IJ.log("⚠ 增益异常(kX=" + kX + ")，请检查两臂光路极性是否一致（或参考臂缺口过多）。");
+            if (!Double.isFinite(kX)) {
+                kX = 1;
+            }
+        }
+        if (!Double.isFinite(kY) || kY < 0 || kY > 2) {
+            IJ.log("⚠ 增益异常(kY=" + kY + ")，请检查两臂光路极性是否一致（或参考臂缺口过多）。");
+            if (!Double.isFinite(kY)) {
+                kY = 1;
+            }
         }
 
-        // 差分 D(t) = meas - k·ref (仅动态起伏)
+        // 差分 D(t) = meas - k·ref；仅在两臂均有真实数据的时刻计算，否则置 NaN(缺口)
         double[] Dx = new double[ng], Dy = new double[ng], D = new double[ng];
         for (int i = 0; i < ng; i++) {
-            Dx[i] = mgxm[i] - kX * rgxm[i];
-            Dy[i] = mgym[i] - kY * rgym[i];
-            D[i] = Math.hypot(Dx[i], Dy[i]);
+            if (Double.isNaN(rgxm[i]) || Double.isNaN(rgym[i])
+                    || Double.isNaN(mgxm[i]) || Double.isNaN(mgym[i])) {
+                Dx[i] = Dy[i] = D[i] = Double.NaN;
+            } else {
+                Dx[i] = mgxm[i] - kX * rgxm[i];
+                Dy[i] = mgym[i] - kY * rgym[i];
+                D[i] = Math.hypot(Dx[i], Dy[i]);
+            }
         }
 
-        // 构造差分 Sample 列表，复用既有统计
+        // 构造差分 Sample：全网格(缺口为 NaN 供绘图断线) + 有效点列表(供统计/散点)
         diffSamples = new ArrayList<>();
+        validSamples = new ArrayList<>();
         for (int i = 0; i < ng; i++) {
             BeamPointingCore.Sample s = new BeamPointingCore.Sample();
             s.t = tg[i];
@@ -126,10 +190,35 @@ public class BeamPointingDiff_ implements PlugIn {
             s.y = Dy[i];
             s.r = D[i];
             diffSamples.add(s);
+            if (!Double.isNaN(D[i])) {
+                validSamples.add(s);
+            }
         }
         diffDx = Dx;
         diffDy = Dy;
         diffD = D;
+
+        // 缺口诊断：统计两臂因缺口被排除的网格点数
+        int gapPtsR = countNaN(rgx), gapPtsM = countNaN(mgx);
+        if (gapPtsR > 0 || gapPtsM > 0) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(alignNote);
+            sb.append("【数据缺口】检测到文件中间存在缺失数据段，已自动跳过这些时刻(不参与插值/差分)：\n");
+            if (gapPtsR > 0) {
+                sb.append(String.format("  参考臂 %s: %d / %d 个网格点位于缺口，已排除\n", refName, gapPtsR, ng));
+            }
+            if (gapPtsM > 0) {
+                sb.append(String.format("  测量臂 %s: %d / %d 个网格点位于缺口，已排除\n", measName, gapPtsM, ng));
+            }
+            alignNote = sb.toString();
+        }
+        if (!alignNote.isEmpty()) {
+            IJ.log(alignNote.trim());
+        }
+        if (validSamples.isEmpty()) {
+            IJ.error("两文件在重叠时段内均无共同有效数据，无法计算差分。");
+            return;
+        }
 
         // 输出（对齐 BeamPointing_ 样式：时间轨迹图 + X-Y 散点图 + Log）
         plotTimeTrace();
@@ -185,7 +274,7 @@ public class BeamPointingDiff_ implements PlugIn {
     }
 
     private void redrawDiffScatter() {
-        int n = diffSamples.size();
+        int n = validSamples.size();
         double factor = distMm > 0 ? 1000.0 / distMm : 1.0;
         boolean urad = factor != 1.0;
         if (urad) {
@@ -196,16 +285,20 @@ public class BeamPointingDiff_ implements PlugIn {
             diffScatterPlot.setYLabel("Offset Y / um");
         }
         diffScatterPlot.clearSeriesData();
+        if (n == 0) {
+            diffScatterPlot.refresh();
+            return;
+        }
         double[] x = new double[n], y = new double[n];
         double sx = 0, sy = 0;
         for (int i = 0; i < n; i++) {
-            x[i] = diffDx[i] * factor;
-            y[i] = diffDy[i] * factor;
+            x[i] = validSamples.get(i).x * factor;
+            y[i] = validSamples.get(i).y * factor;
             sx += x[i];
             sy += y[i];
         }
         double cx = sx / n, cy = sy / n;
-        double rmsUm = BeamPointingCore.centroidRmsUm(diffSamples);
+        double rmsUm = BeamPointingCore.centroidRmsUm(validSamples);
         String unit = urad ? "urad" : "um";
         String label = measName + "(校准)" + String.format(" (%.1f %s)", rmsUm * factor, unit);
         diffScatterPlot.addScatter(x, y, Color.BLUE, label, Plot.MARKER_CIRCLE, true, 4f, 1f);
@@ -216,12 +309,20 @@ public class BeamPointingDiff_ implements PlugIn {
     // ===================== Log（与 BeamPointing_ 完全一致的文字风格） =====================
 
     private void printStats() {
-        double rmsUm = BeamPointingCore.centroidRmsUm(diffSamples);
-        double posUm = BeamPointingCore.positionUm(diffSamples);
+        double rmsUm = validSamples.isEmpty() ? Double.NaN : BeamPointingCore.centroidRmsUm(validSamples);
+        double posUm = validSamples.isEmpty() ? Double.NaN : BeamPointingCore.positionUm(validSamples);
         double pointUrad = BeamPointingCore.pointingUrad(rmsUm, distMm);
-        StringBuilder sb = new StringBuilder("=== Laser Beam Pointing Stability (Differential) ===\n");
-        sb.append(String.format("RMS offset (computed) = %.3f um\n", rmsUm));
-        sb.append(String.format("Mean offset (centroid) = %.3f um\n", posUm));
+        StringBuilder sb = new StringBuilder();
+        if (!alignNote.isEmpty()) {
+            sb.append(alignNote).append("\n");
+        }
+        sb.append("=== Laser Beam Pointing Stability (Differential) ===\n");
+        if (validSamples.isEmpty()) {
+            sb.append("（无有效差分点，无法统计 RMS / Mean）\n");
+        } else {
+            sb.append(String.format("RMS offset (computed) = %.3f um\n", rmsUm));
+            sb.append(String.format("Mean offset (centroid) = %.3f um\n", posUm));
+        }
         if (Double.isNaN(pointUrad)) {
             sb.append("pointing = -  (请在散点图右上角输入传播距离 mm)\n");
         } else {
@@ -255,37 +356,78 @@ public class BeamPointingDiff_ implements PlugIn {
         return a;
     }
 
-    private static double mean(double[] a) {
+    /** 将 Data 裁剪到时间区间 [t0, t1]（闭区间），丢弃区间外采样点，重算 RMS。 */
+    private static BeamPointingCore.Data trimToRange(BeamPointingCore.Data d, double t0, double t1) {
+        List<BeamPointingCore.Sample> kept = new ArrayList<>();
+        for (BeamPointingCore.Sample s : d.samples) {
+            if (s.t >= t0 && s.t <= t1) {
+                kept.add(s);
+            }
+        }
+        double sumR2 = 0;
+        for (BeamPointingCore.Sample s : kept) {
+            sumR2 += s.r * s.r;
+        }
+        double rms = kept.isEmpty() ? Double.NaN : Math.sqrt(sumR2 / kept.size());
+        return new BeamPointingCore.Data(kept, d.stats, rms);
+    }
+
+    /** 名义采样步长：取所有"非缺口"相邻间隔的均值(缺口段按 gapFactor×粗均值判定并排除)。 */
+    private static double nominalStep(double[] t, double gapFactor) {
+        double rough = (t[t.length - 1] - t[0]) / Math.max(1, t.length - 1);
+        double thr = gapFactor * rough;
+        double total = 0;
+        int cnt = 0;
+        for (int i = 0; i < t.length - 1; i++) {
+            double d = t[i + 1] - t[i];
+            if (d > 0 && d <= thr) {
+                total += d;
+                cnt++;
+            }
+        }
+        return cnt > 0 ? total / cnt : rough;
+    }
+
+    /** 均值(跳过 NaN)；全为 NaN 时返回 NaN。 */
+    private static double meanValid(double[] a) {
         double s = 0;
+        int m = 0;
         for (double v : a) {
-            s += v;
+            if (!Double.isNaN(v)) {
+                s += v;
+                m++;
+            }
         }
-        return s / a.length;
+        return m > 0 ? s / m : Double.NaN;
     }
 
-    private static double meanDt(double[] t) {
-        return (t[t.length - 1] - t[0]) / Math.max(1, t.length - 1);
-    }
-
-    private static double[] subMean(double[] a) {
-        double m = mean(a);
-        double[] o = new double[a.length];
-        for (int i = 0; i < a.length; i++) {
-            o[i] = a[i] - m;
-        }
-        return o;
-    }
-
-    private static double dot(double[] a, double[] b) {
+    /** 点积(仅对两数组均非 NaN 的项累加)。 */
+    private static double dotValid(double[] a, double[] b) {
         double s = 0;
         for (int i = 0; i < a.length; i++) {
-            s += a[i] * b[i];
+            if (!Double.isNaN(a[i]) && !Double.isNaN(b[i])) {
+                s += a[i] * b[i];
+            }
         }
         return s;
     }
 
-    /** 线性插值重采样：t 单调递增；tg 落在 [t0,tN] 内时安全（交集网格已保证）。 */
-    private static double[] resample(double[] t, double[] v, double[] tg) {
+    /** 统计数组中的 NaN 个数。 */
+    private static int countNaN(double[] a) {
+        int c = 0;
+        for (double v : a) {
+            if (Double.isNaN(v)) {
+                c++;
+            }
+        }
+        return c;
+    }
+
+    /**
+     * 线性插值重采样：t 单调递增。若目标点所在的相邻采样间隔超过 maxStep(视为数据缺失段)，
+     * 返回 NaN 而非插值伪造，从而让下游差分/绘图自然跳过该缺口。
+     */
+    private static double[] resample(double[] t, double[] v, double[] tg, double maxStep) {
         double[] out = new double[tg.length];
         int n = t.length, j = 0;
         for (int i = 0; i < tg.length; i++) {
@@ -300,6 +442,10 @@ public class BeamPointingDiff_ implements PlugIn {
             }
             while (j < n - 2 && t[j + 1] < x) {
                 j++;
+            }
+            if ((t[j + 1] - t[j]) > maxStep) {
+                out[i] = Double.NaN;
+                continue;
             }
             double f = (x - t[j]) / (t[j + 1] - t[j]);
             out[i] = v[j] + f * (v[j + 1] - v[j]);

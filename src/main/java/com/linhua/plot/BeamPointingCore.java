@@ -148,13 +148,35 @@ public final class BeamPointingCore {
         s.r = Double.parseDouble(v[3].trim());
 
         String[] tp = timeField.split(",");
-        String tstr = tp[tp.length - 1].trim();
-        String[] hms = tstr.split(":");
-        double sec = Integer.parseInt(hms[0]) * 3600
+        if (tp.length < 2) {
+            throw new Exception("时间字段缺少日期或时间（应为 \"YYYY-MM-DD, HH:MM:SS\"）");
+        }
+        String[] d = tp[0].trim().split("-");
+        if (d.length < 3) {
+            throw new Exception("日期格式应为 YYYY-MM-DD");
+        }
+        int Y = Integer.parseInt(d[0]), M = Integer.parseInt(d[1]), D = Integer.parseInt(d[2]);
+        String[] hms = tp[1].trim().split(":");
+        if (hms.length < 3) {
+            throw new Exception("时间格式应为 HH:MM:SS");
+        }
+        double tod = Integer.parseInt(hms[0]) * 3600
                    + Integer.parseInt(hms[1]) * 60
                    + Double.parseDouble(hms[2]);
-        s.t = sec;
+        // 绝对秒(含日期)：跨午夜单调递增，避免"当天秒数"在午夜回绕导致 t 变负/乱序
+        s.t = ymdToDays(Y, M, D) * 86400.0 + tod;
         return s;
+    }
+
+    /** 公历日期 -> 距 1970-01-01 的天数(Howard Hinnant 算法，单调且对跨午夜/跨日正确)。 */
+    private static long ymdToDays(int y, int m, int d) {
+        int yy = (m <= 2) ? y - 1 : y;
+        int mm = (m <= 2) ? m + 12 : m;
+        long era = (yy >= 0 ? yy : yy - 399) / 400;
+        long yoe = yy - era * 400;                       // [0, 399]
+        long doy = (153L * (mm - 3) + 2) / 5 + d - 1;    // [0, 365]
+        long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+        return era * 146097L + doe - 719468L;             // 距 1970-01-01 的天数
     }
 
     private static void IJlog(String msg) {

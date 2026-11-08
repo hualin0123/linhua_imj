@@ -242,6 +242,15 @@ public class BeamPointingCompare_ implements PlugIn {
         PlotUtil.applyStyle(trace, "Time / s", "Offset / um", 0, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
         renderTrace(trace, datas, names, colors, rmean, false);
 
+        // ---- X / Y 分量时间轨迹窗口（分别看 X、Y 方向偏移随时间的变化） ----
+        Plot traceX = new Plot("Beam Pointing Compare - Offset X Time Trace", "Time / s", "Offset X / um");
+        PlotUtil.applyStyle(traceX, "Time / s", "Offset X / um", 0, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
+        renderTraceComp(traceX, datas, names, colors, xmean, ymean, 0, false);
+
+        Plot traceY = new Plot("Beam Pointing Compare - Offset Y Time Trace", "Time / s", "Offset Y / um");
+        PlotUtil.applyStyle(traceY, "Time / s", "Offset Y / um", 0, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
+        renderTraceComp(traceY, datas, names, colors, xmean, ymean, 1, false);
+
         // ---- X–Y 散点窗口（右上角放“对齐中心”与“传播距离”控件） ----
         Plot scatter = new Plot("Beam Pointing Compare - X-Y Scatter", "Offset X / um", "Offset Y / um");
         PlotUtil.applyStyle(scatter, "Offset X / um", "Offset Y / um", 1, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
@@ -275,8 +284,11 @@ public class BeamPointingCompare_ implements PlugIn {
 
         alignBox.addActionListener(e -> {
             double dmm = readDist.getAsDouble();
-            renderTrace(trace, datas, names, colors, rmean, alignBox.isSelected());
-            renderScatter(scatter, datas, names, colors, xmean, ymean, crms, alignBox.isSelected(), dmm);
+            boolean al = alignBox.isSelected();
+            renderTrace(trace, datas, names, colors, rmean, al);
+            renderTraceComp(traceX, datas, names, colors, xmean, ymean, 0, al);
+            renderTraceComp(traceY, datas, names, colors, xmean, ymean, 1, al);
+            renderScatter(scatter, datas, names, colors, xmean, ymean, crms, al, dmm);
         });
         distField.addActionListener(e -> applyDist.accept(readDist.getAsDouble()));
         distField.addFocusListener(new FocusAdapter() {
@@ -291,6 +303,8 @@ public class BeamPointingCompare_ implements PlugIn {
         renderScatter(scatter, datas, names, colors, xmean, ymean, crms, false, 0);
 
         trace.showPlot();
+        traceX.showPlot();
+        traceY.showPlot();
         scatter.showPlot();
     }
 
@@ -335,6 +349,26 @@ public class BeamPointingCompare_ implements PlugIn {
                 r[k] = align ? s.get(k).r - rmean[i] : s.get(k).r;
             }
             p.addLine(t, r, colors[i], names.get(i));
+        }
+        p.refresh();
+    }
+
+    /** 时间轨迹（分量）：每 run 叠加 X 或 Y 偏移，align 时减去各自分量均值；which: 0=X, 1=Y。 */
+    private void renderTraceComp(Plot p, List<BeamPointingCore.Data> datas, List<String> names,
+                                 Color[] colors, double[] xmean, double[] ymean, int which, boolean align) {
+        p.clearSeriesData();
+        int n = datas.size();
+        for (int i = 0; i < n; i++) {
+            List<BeamPointingCore.Sample> s = datas.get(i).samples;
+            int m = s.size();
+            double[] t = new double[m], v = new double[m];
+            double mean = (which == 0) ? xmean[i] : ymean[i];
+            for (int k = 0; k < m; k++) {
+                double raw = (which == 0) ? s.get(k).x : s.get(k).y;
+                v[k] = align ? raw - mean : raw;
+                t[k] = s.get(k).t;
+            }
+            p.addLine(t, v, colors[i], names.get(i));
         }
         p.refresh();
     }

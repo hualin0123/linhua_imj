@@ -3,6 +3,8 @@
 基于 Maven 的 ImageJ1 插件组。顶层菜单为 `Plugins>LinHua`，下设 `Plot`（作图 / 激光测量）与
 `Gaus`（高斯光束 / ABCD 光路计算）两个子菜单，每个工具放在各自的子目录下。
 
+> **⚠ 强制阅读（AI 会话）**：读完本 README 后，**必须立即继续阅读并严格遵守** [`VERIFICATION.md`](./VERIFICATION.md)（验证分层、强制机械化测试、领域规则由人确认）。凡改动 `com.linhua.*` 前，须先读完本文件与 `VERIFICATION.md` 并遵守其全部约定；**不得仅凭本 README 开工**。
+
 ## 目录结构
 
 ```
@@ -18,7 +20,7 @@ linhua_imj/
     │   │   ├── PlotUtil.java       #   配色/标记分配、刻度数字格式、统一风格应用、统一文件选择（多选对话框）
     │   │   ├── BeamPointing_.java  #   功能：Beam Pointing 单次测量（X–Y 散点标 RMS 圈；右上角可输入传播距离转 μrad）
     │   │   ├── BeamPointingCompare_.java #   功能：Beam Pointing 多文件对比（多选对话框，按相对时间叠加，可切换对齐中心、输入传播距离将 X/Y 转 μrad；散点半透明异形、每 run 标 RMS 圈；散点图图例附带 RMS 抖动值，单位随坐标轴动态显示 um/urad）
-    │   │   ├── BeamPointingDiff_.java #   功能：Beam Pointing 差分（参考臂−测量臂共模抑制）：自动时间对齐（裁剪较长文件到共同区间）+ 中间缺口跳过（缺口置 NaN 不插值伪造）+ 增益匹配 + 逐点差分；时间轨迹断线、散点/RMS 仅基于有效点
+    │   │   ├── BeamPointingDiff_.java #   功能：Beam Pointing 差分（参考臂−测量臂共模抑制）：自动时间对齐（裁剪较长文件到共同区间）+ 中间缺口跳过（缺口置 NaN 不插值伪造）+ 增益恒为 k=1 直接逐点相减（不做最小二乘增益拟合）+ 逐点差分；两臂相关性诊断（corr<0.3 告警）；时间轨迹断线、散点/RMS 仅基于有效点
     │   │   ├── BeamPointingCore.java #   共用：CSV 解析（含日期的绝对秒，跨午夜单调递增，单跑/对比/差分共用）+ 数据载体
     │   │   ├── M2_.java            #   功能：M2 光束质量因子
     │   │   ├── Multiline1_.java    #   功能：多线图（同 X，多选对话框）

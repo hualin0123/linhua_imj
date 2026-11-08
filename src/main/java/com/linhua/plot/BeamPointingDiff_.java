@@ -44,7 +44,6 @@ public class BeamPointingDiff_ implements PlugIn {
     private List<BeamPointingCore.Sample> diffSamples;           // 差分结果(全网格，缺口为 NaN)
     private List<BeamPointingCore.Sample> validSamples;          // 差分有效点(两臂均有真实数据，供统计/散点)
     private double[] diffDx, diffDy, diffD, tg;                 // 差分分量/合成/时间网格(μm)
-    private double kX, kY;                                      // 增益匹配系数
     private BeamPointingCore.Data refData, measData;             // 留存供 Log 复用
     private String measName;                                    // 测量臂(含被测器件)CSV 名(去扩展名)，用于图例
     private Plot diffScatterPlot;                               // 图2(用于重绘)
@@ -139,46 +138,21 @@ public class BeamPointingDiff_ implements PlugIn {
         double[] rgx = resample(rt, rx, tg, gapR), rgy = resample(rt, ry, tg, gapR);
         double[] mgx = resample(mt, mx, tg, gapM), mgy = resample(mt, my, tg, gapM);
 
-        // 增益匹配(各轴独立，去均值后最小二乘 k=<r,m>/<r,r>)；均值/点积均跳过缺口 NaN
-        double mRx = meanValid(rgx), mRy = meanValid(rgy);
-        double mMx = meanValid(mgx), mMy = meanValid(mgy);
-        double[] rgxm = new double[ng], rgym = new double[ng];
-        double[] mgxm = new double[ng], mgym = new double[ng];
-        for (int i = 0; i < ng; i++) {
-            boolean rOk = !Double.isNaN(rgx[i]) && !Double.isNaN(rgy[i]);
-            boolean mOk = !Double.isNaN(mgx[i]) && !Double.isNaN(mgy[i]);
-            rgxm[i] = rOk ? rgx[i] - mRx : Double.NaN;
-            rgym[i] = rOk ? rgy[i] - mRy : Double.NaN;
-            mgxm[i] = mOk ? mgx[i] - mMx : Double.NaN;
-            mgym[i] = mOk ? mgy[i] - mMy : Double.NaN;
-        }
-        kX = dotValid(rgxm, mgxm) / dotValid(rgxm, rgxm);
-        kY = dotValid(rgym, mgym) / dotValid(rgym, rgym);
-        if (!Double.isFinite(kX) || kX < 0 || kX > 2) {
-            IJ.log("⚠ 增益异常(kX=" + kX + ")，请检查两臂光路极性是否一致（或参考臂缺口过多）。");
-            if (!Double.isFinite(kX)) {
-                kX = 1;
-            }
-        }
-        if (!Double.isFinite(kY) || kY < 0 || kY > 2) {
-            IJ.log("⚠ 增益异常(kY=" + kY + ")，请检查两臂光路极性是否一致（或参考臂缺口过多）。");
-            if (!Double.isFinite(kY)) {
-                kY = 1;
-            }
-        }
+        // 增益：实验上两臂为同一束光分光、增益一致，恒取 k=1，直接相减(见 differential())。
+        // 不做最小二乘增益拟合(该拟合在相关性低/含大幅独立信号时会崩溃，见下方 corr 诊断)。
 
-        // 差分 D(t) = meas - k·ref；仅在两臂均有真实数据的时刻计算，否则置 NaN(缺口)
+        // 相关性诊断：两臂各自起伏的 Pearson 相关系数；corr 低说明该轴无可靠共模，差分结果不可信
+        double corrX = corrValid(rgx, mgx);
+        double corrY = corrValid(rgy, mgy);
+        StringBuilder corrNote = new StringBuilder();
+        corrNote.append("【相关性诊断】两臂相关系数(参考臂 vs 测量臂)：\n");
+        appendCorr(corrNote, "X", corrX);
+        appendCorr(corrNote, "Y", corrY);
+        alignNote += corrNote.toString();
+
+        // 差分 D(t) = meas - ref (k=1)；仅在两臂均有真实数据的时刻计算，否则置 NaN(缺口)
         double[] Dx = new double[ng], Dy = new double[ng], D = new double[ng];
-        for (int i = 0; i < ng; i++) {
-            if (Double.isNaN(rgxm[i]) || Double.isNaN(rgym[i])
-                    || Double.isNaN(mgxm[i]) || Double.isNaN(mgym[i])) {
-                Dx[i] = Dy[i] = D[i] = Double.NaN;
-            } else {
-                Dx[i] = mgxm[i] - kX * rgxm[i];
-                Dy[i] = mgym[i] - kY * rgym[i];
-                D[i] = Math.hypot(Dx[i], Dy[i]);
-            }
-        }
+        differential(rgx, rgy, mgx, mgy, Dx, Dy, D);
 
         // 构造差分 Sample：全网格(缺口为 NaN 供绘图断线) + 有效点列表(供统计/散点)
         diffSamples = new ArrayList<>();
@@ -220,8 +194,12 @@ public class BeamPointingDiff_ implements PlugIn {
             return;
         }
 
-        // 输出（对齐 BeamPointing_ 样式：时间轨迹图 + X-Y 散点图 + Log）
+        // 输出（对齐 BeamPointing_ 样式：合成时间轨迹 + X/Y 分量时间轨迹 + X-Y 散点图 + Log）
         plotTimeTrace();
+        plotTimeTraceComp(diffDx, Color.BLUE,
+                "Beam Pointing (Differential) - Offset X Time Trace", "Offset X / um", measName + "(校准)");
+        plotTimeTraceComp(diffDy, Color.BLUE,
+                "Beam Pointing (Differential) - Offset Y Time Trace", "Offset Y / um", measName + "(校准)");
         plotDiffScatter();
         printStats();
     }
@@ -234,6 +212,14 @@ public class BeamPointingDiff_ implements PlugIn {
         p.addLine(tg, diffDx, Color.RED, "ΔX");
         p.addLine(tg, diffDy, Color.GREEN, "ΔY");
         p.addLine(tg, diffD, Color.BLUE, "Δ(合成)");
+        p.showPlot();
+    }
+
+    /** 分量时间轨迹：单独画一条 ΔX 或 ΔY vs Time（各自 Y 轴自动缩放，缺口处自动断线）。 */
+    private void plotTimeTraceComp(double[] comp, Color c, String title, String yLabel, String legend) {
+        Plot p = new Plot(title, "Time / s", yLabel);
+        PlotUtil.applyStyle(p, "Time / s", yLabel, 0, 1, Plot.LEGEND_UPPER_LEFT, true, false, true);
+        p.addLine(tg, comp, c, legend);
         p.showPlot();
     }
 
@@ -388,28 +374,53 @@ public class BeamPointingDiff_ implements PlugIn {
         return cnt > 0 ? total / cnt : rough;
     }
 
-    /** 均值(跳过 NaN)；全为 NaN 时返回 NaN。 */
-    private static double meanValid(double[] a) {
-        double s = 0;
+    /** Pearson 相关系数(仅对两数组均非 NaN 的点计算)；无有效点时返回 NaN。 */
+    private static double corrValid(double[] a, double[] b) {
+        int n = a.length;
+        double ma = 0, mb = 0;
         int m = 0;
-        for (double v : a) {
-            if (!Double.isNaN(v)) {
-                s += v;
+        for (int i = 0; i < n; i++) {
+            if (!Double.isNaN(a[i]) && !Double.isNaN(b[i])) {
+                ma += a[i];
+                mb += b[i];
                 m++;
             }
         }
-        return m > 0 ? s / m : Double.NaN;
-    }
-
-    /** 点积(仅对两数组均非 NaN 的项累加)。 */
-    private static double dotValid(double[] a, double[] b) {
-        double s = 0;
-        for (int i = 0; i < a.length; i++) {
+        if (m == 0) {
+            return Double.NaN;
+        }
+        ma /= m;
+        mb /= m;
+        double cov = 0, va = 0, vb = 0;
+        for (int i = 0; i < n; i++) {
             if (!Double.isNaN(a[i]) && !Double.isNaN(b[i])) {
-                s += a[i] * b[i];
+                double da = a[i] - ma, db = b[i] - mb;
+                cov += da * db;
+                va += da * da;
+                vb += db * db;
             }
         }
-        return s;
+        if (va == 0 || vb == 0) {
+            return Double.NaN;
+        }
+        return cov / Math.sqrt(va * vb);
+    }
+
+    /** 把单轴相关性结论追加到诊断文本。 */
+    private static void appendCorr(StringBuilder sb, String axis, double corr) {
+        if (Double.isNaN(corr)) {
+            sb.append(String.format("  %s 轴：有效数据不足，无法计算相关性\n", axis));
+            return;
+        }
+        String level;
+        if (corr >= 0.7) {
+            level = "共模良好，差分结果可信";
+        } else if (corr >= 0.3) {
+            level = "相关性一般，共模抑制有限，结果谨慎参考";
+        } else {
+            level = "相关性低，共模抑制不可靠，该轴差分结果请勿采信（请检查光路/参考臂）";
+        }
+        sb.append(String.format("  %s 轴：corr = %.3f —— %s\n", axis, corr, level));
     }
 
     /** 统计数组中的 NaN 个数。 */
@@ -421,6 +432,26 @@ public class BeamPointingDiff_ implements PlugIn {
             }
         }
         return c;
+    }
+
+    /**
+     * 逐点差分（共模抑制核心）：D = meas − ref，增益恒为 1。
+     * 任一臂在时刻 i 为 NaN（缺口）则该点整体置 NaN，供下游绘图/统计自然跳过。
+     * 抽成纯方法以便单测直接调用真实代码断言「共模必被抵消」。
+     */
+    static void differential(double[] rgx, double[] rgy, double[] mgx, double[] mgy,
+                             double[] Dx, double[] Dy, double[] D) {
+        int n = rgx.length;
+        for (int i = 0; i < n; i++) {
+            if (Double.isNaN(rgx[i]) || Double.isNaN(rgy[i])
+                    || Double.isNaN(mgx[i]) || Double.isNaN(mgy[i])) {
+                Dx[i] = Dy[i] = D[i] = Double.NaN;
+            } else {
+                Dx[i] = mgx[i] - rgx[i];
+                Dy[i] = mgy[i] - rgy[i];
+                D[i] = Math.hypot(Dx[i], Dy[i]);
+            }
+        }
     }
 
     /**

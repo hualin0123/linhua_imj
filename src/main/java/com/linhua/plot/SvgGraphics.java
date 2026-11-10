@@ -48,12 +48,34 @@ final class SvgGraphics extends Graphics2D {
     private int clipDepth = 0;
     private int clipId = 0;
 
+    // 折线合并缓冲：把连续、同款式的 drawLine 合并为一条 <path>，省掉每段重复的样式属性。
+    private StringBuilder pathD = null;
+    private String pathColor = "";
+    private float pathStrokeW = 1f;
+    private String pathOpacity = "";
+    private double pathLastX = 0, pathLastY = 0;
+    private boolean pathOpen = false;
+
+    // 散点分组缓冲：连续、同款式的 ellipse 并入同一个 <g>，子元素只保留坐标，去掉每点的样式属性。
+    private StringBuilder ellipseGrp = null;
+    private String egKey = "";
+    private boolean egOpen = false;
+
+    // 标记(三角/方/菱)分组缓冲：连续、同款式的 polygon 并入同一个 <g>，子元素只保留 points，
+    // 透明度逐元素下放（抽稀补偿使每格 alpha 不同）。
+    private StringBuilder polyGrp = null;
+    private String pgKey = "";
+    private boolean pgOpen = false;
+
     SvgGraphics(int w, int h) {
         W = w;
         H = h;
     }
 
     String toSvg() {
+        flushPath();
+        flushEllipseGrp();
+        flushPolyGrp();
         StringBuilder out = new StringBuilder();
         out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.append("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"").append(W)
@@ -139,6 +161,9 @@ final class SvgGraphics extends Graphics2D {
     @Override public Rectangle getClipBounds() { return clip == null ? null : clip.getBounds(); }
     @Override public void setClip(int x, int y, int w, int h) { setClip(new Rectangle(x, y, w, h)); }
     @Override public void setClip(Shape s) {
+        flushPath();
+        flushEllipseGrp();
+        flushPolyGrp();
         if (s == null) {
             while (clipDepth > 0) { sb.append("</g>\n"); clipDepth--; }
             clip = null;
@@ -160,12 +185,40 @@ final class SvgGraphics extends Graphics2D {
 
     // ---- 图元 ----
     @Override public void drawLine(int x1, int y1, int x2, int y2) {
+        if (egOpen) flushEllipseGrp();
+        if (pgOpen) flushPolyGrp();
         double[] a = t(x1, y1), b = t(x2, y2);
-        sb.append("<line x1=\"").append(fmt(a[0])).append("\" y1=\"").append(fmt(a[1]))
-          .append("\" x2=\"").append(fmt(b[0])).append("\" y2=\"").append(fmt(b[1]))
-          .append("\" stroke=\"").append(rgb(color)).append("\"")
-          .append(" stroke-width=\"").append(fmt(stroke)).append("\"")
-          .append(opacityAttr()).append("/>\n");
+        String col = rgb(color);
+        String op = opacityAttr();
+        if (pathOpen) {
+            boolean sameStyle = col.equals(pathColor) && pathStrokeW == stroke && op.equals(pathOpacity);
+            if (sameStyle) {
+                boolean continuous = Math.abs(a[0] - pathLastX) < 0.01 && Math.abs(a[1] - pathLastY) < 0.01;
+                if (continuous) {
+                    pathD.append('L').append(fmt(b[0])).append(' ').append(fmt(b[1])).append(' ');
+                } else {
+                    pathD.append('M').append(fmt(a[0])).append(' ').append(fmt(a[1]))
+                        .append(' ').append('L').append(fmt(b[0])).append(' ').append(fmt(b[1])).append(' ');
+                }
+                pathLastX = b[0]; pathLastY = b[1];
+                return;
+            }
+            flushPath();
+        }
+        pathD = new StringBuilder();
+        pathD.append('M').append(fmt(a[0])).append(' ').append(fmt(a[1]))
+            .append(' ').append('L').append(fmt(b[0])).append(' ').append(fmt(b[1])).append(' ');
+        pathColor = col; pathStrokeW = stroke; pathOpacity = op;
+        pathLastX = b[0]; pathLastY = b[1]; pathOpen = true;
+    }
+
+    private void flushPath() {
+        if (!pathOpen) return;
+        sb.append("<path d=\"").append(pathD)
+          .append("\" fill=\"none\" stroke=\"").append(pathColor)
+          .append("\" stroke-width=\"").append(fmt(pathStrokeW)).append("\"")
+          .append(pathOpacity).append("/>\n");
+        pathOpen = false;
     }
 
     @Override public void fillRect(int x, int y, int w, int h) { rect(x, y, w, h, true); }
@@ -233,11 +286,18 @@ final class SvgGraphics extends Graphics2D {
         SvgGraphics c = new SvgGraphics(W, H);
         c.color = color; c.stroke = stroke; c.font = font;
         c.tx = new AffineTransform(tx); c.clip = clip; c.clipDepth = clipDepth; c.clipId = clipId;
+        c.pathD = pathD; c.pathColor = pathColor; c.pathStrokeW = pathStrokeW;
+        c.pathOpacity = pathOpacity; c.pathLastX = pathLastX; c.pathLastY = pathLastY; c.pathOpen = pathOpen;
+        c.ellipseGrp = ellipseGrp; c.egKey = egKey; c.egOpen = egOpen;
+        c.polyGrp = polyGrp; c.pgKey = pgKey; c.pgOpen = pgOpen;
         return c;
     }
 
     // ---- 内部图元输出 ----
     private void rect(double x, double y, double w, double h, boolean fill) {
+        flushPath();
+        flushEllipseGrp();
+        flushPolyGrp();
         double[] p = t(x, y), q = t(x + w, y + h);
         double xa = Math.min(p[0], q[0]), ya = Math.min(p[1], q[1]);
         double xb = Math.max(p[0], q[0]), yb = Math.max(p[1], q[1]);
@@ -256,36 +316,79 @@ final class SvgGraphics extends Graphics2D {
     }
 
     private void ellipse(double x, double y, double w, double h, boolean fill) {
+        if (pathOpen) flushPath();
+        if (pgOpen) flushPolyGrp();
         double[] c = t(x + w / 2, y + h / 2);
         double sx = Math.hypot(tx.getScaleX(), tx.getShearY());
         double sy = Math.hypot(tx.getShearX(), tx.getScaleY());
         double rx = Math.abs(w / 2) * sx, ry = Math.abs(h / 2) * sy;
-        if (fill) {
-            sb.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
-              .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry))
-              .append("\" fill=\"").append(rgb(color)).append("\"")
-              .append(opacityAttr()).append("/>\n");
-        } else {
-            sb.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
-              .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry))
-              .append("\" fill=\"none\" stroke=\"").append(rgb(color))
-              .append("\" stroke-width=\"").append(fmt(stroke)).append("\"")
-              .append(opacityAttr()).append("/>\n");
+        String op = opacityAttr();
+        // 注意：opacity 不能放在组级（组级 opacity 会先把组内元素合成到离屏缓冲、再整体乘一次，
+        // 破坏半透明重叠的"叠加累计"）。因此组只持有 fill/stroke 去做样式去重，
+        // 透明度下放到每个 <ellipse>，使其各自合成、正确叠加。
+        String key = (fill ? "F|" : "S|") + rgb(color) + "|" + fmt(stroke)
+                   + "|" + fmt(rx) + "|" + fmt(ry);
+        if (egOpen && key.equals(egKey)) {
+            ellipseGrp.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
+                      .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry)).append("\"")
+                      .append(op).append("/>\n");
+            return;
         }
+        flushEllipseGrp();
+        sb.append("<g ");
+        if (fill) sb.append("fill=\"").append(rgb(color)).append("\"");
+        else sb.append("fill=\"none\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"");
+        sb.append(">\n");
+        ellipseGrp = new StringBuilder();
+        ellipseGrp.append("<ellipse cx=\"").append(fmt(c[0])).append("\" cy=\"").append(fmt(c[1]))
+                  .append("\" rx=\"").append(fmt(rx)).append("\" ry=\"").append(fmt(ry)).append("\"")
+                  .append(op).append("/>\n");
+        egKey = key; egOpen = true;
+    }
+
+    private void flushEllipseGrp() {
+        if (!egOpen) return;
+        sb.append(ellipseGrp).append("</g>\n");
+        egOpen = false;
     }
 
     private void poly(int[] x, int[] y, int n, boolean fill) {
-        sb.append("<polygon points=\"");
+        if (pathOpen) flushPath();
+        if (egOpen) flushEllipseGrp();
+        StringBuilder pts = new StringBuilder();
         for (int i = 0; i < n; i++) {
             double[] p = t(x[i], y[i]);
-            sb.append(fmt(p[0])).append(',').append(fmt(p[1])).append(' ');
+            pts.append(fmt(p[0])).append(',').append(fmt(p[1])).append(' ');
         }
-        sb.append("\" ");
-        if (fill) sb.append("fill=\"").append(rgb(color)).append("\"").append(opacityAttr()).append("/>\n");
-        else sb.append("fill=\"none\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"").append(opacityAttr()).append("/>\n");
+        String op = opacityAttr();
+        // 透明度因抽稀补偿逐格不同，下放每个 <polygon>；组只持有 fill/stroke 去重
+        String key = (fill ? "F|" : "S|") + rgb(color) + "|" + fmt(stroke);
+        if (pgOpen && key.equals(pgKey)) {
+            polyGrp.append("<polygon points=\"").append(pts).append("\"")
+                   .append(op).append("/>\n");
+            return;
+        }
+        flushPolyGrp();
+        sb.append("<g ");
+        if (fill) sb.append("fill=\"").append(rgb(color)).append("\"");
+        else sb.append("fill=\"none\" stroke=\"").append(rgb(color)).append("\" stroke-width=\"").append(fmt(stroke)).append("\"");
+        sb.append(">\n");
+        polyGrp = new StringBuilder();
+        polyGrp.append("<polygon points=\"").append(pts).append("\"")
+               .append(op).append("/>\n");
+        pgKey = key; pgOpen = true;
+    }
+
+    private void flushPolyGrp() {
+        if (!pgOpen) return;
+        sb.append(polyGrp).append("</g>\n");
+        pgOpen = false;
     }
 
     private void text(String s, double x, double y) {
+        flushPath();
+        flushEllipseGrp();
+        flushPolyGrp();
         double[] p = t(x, y);
         double deg = rotDeg();
         if (Math.abs(deg) > 0.01) {

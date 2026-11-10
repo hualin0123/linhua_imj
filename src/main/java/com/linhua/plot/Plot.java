@@ -18,7 +18,9 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.imageio.ImageIO;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
@@ -56,6 +58,13 @@ public class Plot extends JPanel {
     public static final int LINE = 0;
     /** 散点序列。 */
     public static final int SCATTER = 1;
+
+    /** 抽稀：每像素格边长（px）。1 = 逐像素，保真度最高；调大则更激进、体积更小、外观略有损。 */
+    private static final int DECIM_CELL = 1;
+    /** 抽稀自动开关：单序列散点数超过该值才启用抽稀，否则全量绘制（小图零损失）。 */
+    private static final int DECIM_MIN_POINTS = 4000;
+    /** 抽稀补偿：仅对"被合并的格子(k>1)"额外提升透明度，抵消合并后抗锯齿边缘墨量损失造成的偏淡；k=1 稀疏点不动。1.0=不增益。 */
+    private static final float DECIM_OPACITY_BOOST = 1.0f;
     /** 数据坐标系下的填充矩形（用于密度热力图）。 */
     public static final int RECT = 2;
     /** 数据坐标系下的空心圆（用于 RMS 偏移圈等参考圈）。 */
@@ -695,10 +704,47 @@ public class Plot extends JPanel {
                 g2.setColor(s.color);
                 g2.drawOval(pcx - prx, pcy - pry, prx * 2, pry * 2);
             } else { // SCATTER
-                for (int i = 0; i < s.x.length; i++) {
-                    int px = toPxX(s.x[i], x0, x1);
-                    int py = toPxY(s.y[i], y0, y1);
-                    drawMarker(g2, px, py, s.marker, s.hollow, s.markerSize, s.color, s.markerEdge);
+                // 自动开关：仅当导出 SVG 且本序列点数足够多时才抽稀；小图/屏幕走全量，零损失。
+                boolean decim = (g2 instanceof SvgGraphics) && s.x.length > DECIM_MIN_POINTS;
+                if (decim) {
+                    // 带透明度补偿的逐像素抽稀：同一整数像素内的点合并为 1 个代表点（质心），
+                    // 其透明度取格内点数叠加累计值 1-(1-a)^k，从而还原"密集区更实"的密度观感。
+                    // 按累计透明度排序发射，使同透明度格子连续成组、合并进同一个 <g>。
+                    float a = s.color.getAlpha() / 255f;
+                    Map<Long, long[]> grid = new HashMap<>();
+                    for (int i = 0; i < s.x.length; i++) {
+                        int px = toPxX(s.x[i], x0, x1);
+                        int py = toPxY(s.y[i], y0, y1);
+                        long key = ((long) (px / DECIM_CELL)) * 1000000L + (py / DECIM_CELL);
+                        long[] bucket = grid.get(key);
+                        if (bucket == null) { bucket = new long[3]; grid.put(key, bucket); }
+                        bucket[0] += px; bucket[1] += py; bucket[2]++;
+                    }
+                    List<int[]> reps = new ArrayList<>(grid.size());
+                    for (long[] b : grid.values()) {
+                        int cnt = (int) b[2];
+                        int cx = (int) Math.round(b[0] / cnt);
+                        int cy = (int) Math.round(b[1] / cnt);
+                        float comp = (float) (1.0 - Math.pow(1.0 - a, cnt));
+                        if (comp > 1f) comp = 1f;
+                        // 合并后的格子(k>1)额外增益透明度，补偿边缘抗锯齿墨量损失；k=1 稀疏点保持原样。
+                        if (cnt > 1) comp = Math.min(1f, comp * DECIM_OPACITY_BOOST);
+                        int alpha = Math.round(comp * 255f);
+                        if (alpha > 255) alpha = 255;
+                        reps.add(new int[]{cx, cy, alpha});
+                    }
+                    reps.sort((u, v) -> Integer.compare(u[2], v[2]));
+                    for (int[] r : reps) {
+                        Color c = new Color(s.color.getRed(), s.color.getGreen(),
+                                s.color.getBlue(), r[2]);
+                        drawMarker(g2, r[0], r[1], s.marker, s.hollow, s.markerSize, c, s.markerEdge);
+                    }
+                } else {
+                    for (int i = 0; i < s.x.length; i++) {
+                        int px = toPxX(s.x[i], x0, x1);
+                        int py = toPxY(s.y[i], y0, y1);
+                        drawMarker(g2, px, py, s.marker, s.hollow, s.markerSize, s.color, s.markerEdge);
+                    }
                 }
             }
         }

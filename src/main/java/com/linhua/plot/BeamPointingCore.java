@@ -30,10 +30,13 @@ public final class BeamPointingCore {
         final List<Sample> samples;
         final List<Stats> stats;
         final double rms;
-        Data(List<Sample> samples, List<Stats> stats, double rms) {
+        /** 首个采样点的绝对时间（含日期的秒，与 {@code Sample.t} 同一坐标；{@code Sample.t} 是相对它的偏移）。 */
+        final double absStart;
+        Data(List<Sample> samples, List<Stats> stats, double rms, double absStart) {
             this.samples = samples;
             this.stats = stats;
             this.rms = rms;
+            this.absStart = absStart;
         }
     }
 
@@ -91,7 +94,7 @@ public final class BeamPointingCore {
             throw new Exception("未从文件中解析到任何采样数据。");
         }
         double rms = Math.sqrt(sumR2 / samples.size());
-        return new Data(samples, stats, rms);
+        return new Data(samples, stats, rms, t0);
     }
 
     /** 质心位置偏移大小（μm）：hypot(meanX, meanY)。用于替代 CSV 中的 position 统计。 */
@@ -125,6 +128,56 @@ public final class BeamPointingCore {
             ss += dx * dx + dy * dy;
         }
         return Math.sqrt(ss / m);
+    }
+
+    /**
+     * 给定一组样本，返回 {xmean, ymean, rmean, crms}（绕质心的二维 RMS 抖动）。
+     * 纯计算、无副作用，供「全部」与「分阶段」统计共用，也可被单测直接断言。
+     */
+    public static double[] centroidStats(List<Sample> samples) {
+        int m = samples.size();
+        if (m == 0) {
+            return new double[]{0, 0, 0, 0};
+        }
+        double sx = 0, sy = 0, sr = 0;
+        for (Sample s : samples) {
+            sx += s.x;
+            sy += s.y;
+            sr += s.r;
+        }
+        double xm = sx / m, ym = sy / m, rm = sr / m;
+        double ss = 0;
+        for (Sample s : samples) {
+            double dx = s.x - xm, dy = s.y - ym;
+            ss += dx * dx + dy * dy;
+        }
+        double cr = Math.sqrt(ss / m);
+        return new double[]{xm, ym, rm, cr};
+    }
+
+    /**
+     * 按绝对时间窗口 [a, b) 切片：返回新样本列表，其 {@code t} 重基为相对窗口起点的
+     * 「阶段相对时间」（便于阶段内从 0 起画时间轨迹）。样本本身（x/y/r）不被修改。
+     * 纯计算、无副作用，可供单测直接断言。
+     *
+     * @param samples  相对时间样本（{@code Sample.t} = absStart + s.t 为绝对时间）
+     * @param absStart 本文件首个采样的绝对时间
+     * @param a, b     绝对时间窗口 [a, b)
+     */
+    public static List<Sample> slicePhase(List<Sample> samples, double absStart, double a, double b) {
+        List<Sample> out = new ArrayList<>();
+        for (Sample s : samples) {
+            double abs = absStart + s.t;
+            if (abs >= a && abs < b) {
+                Sample c = new Sample();
+                c.x = s.x;
+                c.y = s.y;
+                c.r = s.r;
+                c.t = abs - a; // 重基为阶段相对时间
+                out.add(c);
+            }
+        }
+        return out;
     }
 
     /** 解析一行采样数据："日期, 时间",X,Y,偏移。 */
@@ -169,7 +222,7 @@ public final class BeamPointingCore {
     }
 
     /** 公历日期 -> 距 1970-01-01 的天数(Howard Hinnant 算法，单调且对跨午夜/跨日正确)。 */
-    private static long ymdToDays(int y, int m, int d) {
+    public static long ymdToDays(int y, int m, int d) {
         int yy = (m <= 2) ? y - 1 : y;
         int mm = (m <= 2) ? m + 12 : m;
         long era = (yy >= 0 ? yy : yy - 399) / 400;

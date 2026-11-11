@@ -306,13 +306,14 @@ public final class PlotUtil {
         if (alignBox != null) {
             panel.add(alignBox);
             panel.add(Box.createHorizontalStrut(4));
+            // 有「对齐中心」开关时才需要分隔线；无开关时该竖线多余
+            JSeparator sep = new JSeparator(SwingConstants.VERTICAL);
+            sep.setForeground(new Color(0x999999));
+            sep.setPreferredSize(new Dimension(1, 1));
+            sep.setMaximumSize(new Dimension(1, Integer.MAX_VALUE));
+            panel.add(sep);
+            panel.add(Box.createHorizontalStrut(4));
         }
-        JSeparator sep = new JSeparator(SwingConstants.VERTICAL);
-        sep.setForeground(new Color(0x999999));
-        sep.setPreferredSize(new Dimension(1, 1));
-        sep.setMaximumSize(new Dimension(1, Integer.MAX_VALUE));
-        panel.add(sep);
-        panel.add(Box.createHorizontalStrut(4));
         panel.add(new JLabel("传播距离"));
         panel.add(Box.createHorizontalStrut(4));
         panel.add(distField);

@@ -92,6 +92,8 @@ public class Plot extends JPanel {
     private static final int ICON_PAN = 2;
     /** 工具栏图标：存储图形（软盘）。 */
     private static final int ICON_SAVE = 3;
+    /** 工具栏图标：快捷导出 PNG（向下箭头落入托盘）。 */
+    private static final int ICON_EXPORT = 4;
 
     private static final int NONE = 0;
     private static final int ZOOM = 1;
@@ -169,6 +171,7 @@ public class Plot extends JPanel {
     private int legendLoc = LEGEND_UPPER_LEFT;
     private boolean legendFrame = false;
     private float legendFontPt = 11f;
+    private String legendTitle = null;
     private Double userXMin = null, userXMax = null, userYMin = null, userYMax = null;
 
     // 当前坐标轴范围
@@ -272,6 +275,8 @@ public class Plot extends JPanel {
     public void setLegendLocation(int loc) { legendLoc = loc; }
     public void setLegendFrame(boolean b) { legendFrame = b; }
     public void setLegendFontSize(float pt) { legendFontPt = pt; }
+    /** 设置图例上方的「标题」（如阶段名）；传 null / 空白则不加。 */
+    public void setLegendTitle(String s) { this.legendTitle = s; }
     public void setXLim(Double min, Double max) { userXMin = min; userXMax = max; }
     public void setYLim(Double min, Double max) { userYMin = min; userYMax = max; }
 
@@ -313,6 +318,7 @@ public class Plot extends JPanel {
         JButton save = new JButton(makeIcon(ICON_SAVE));
         save.setToolTipText("存储图形：导出 PNG / SVG");
         save.addActionListener(e -> savePlot());
+        this.saveBtn = save;
 
         bar.add(home);
         bar.add(zoom);
@@ -343,6 +349,7 @@ public class Plot extends JPanel {
             case ICON_ZOOM: drawZoom(g); break;
             case ICON_PAN:  drawPan(g);  break;
             case ICON_SAVE: drawSave(g); break;
+            case ICON_EXPORT: drawExport(g); break;
             default: break;
         }
         g.dispose();
@@ -382,7 +389,18 @@ public class Plot extends JPanel {
         g.fillRect(4, 2, 7, 4);
     }
 
+    private void drawExport(Graphics2D g) {
+        // 向下箭头（导出/下载）落入托盘：与软盘「另存为」区分，表示一键导出到预设文件夹
+        g.drawLine(8, 3, 8, 10);          // 箭杆
+        g.drawLine(5, 7, 8, 10);          // 箭头左翼
+        g.drawLine(11, 7, 8, 10);         // 箭头右翼
+        g.drawLine(3, 9, 3, 12);          // 托盘左壁
+        g.drawLine(13, 9, 13, 12);        // 托盘右壁
+        g.drawLine(3, 12, 13, 12);        // 托盘底
+    }
+
     private JButton pan; // 占位，供 buildToolBar 内部引用
+    private JButton saveBtn; // 记住「存储图形」按钮，便于在其后插入导出按钮
     private JToolBar toolbar; // 构建时记住，便于追加右上角控件
 
     private void setButtonSelected(JButton b, boolean sel) {
@@ -394,6 +412,20 @@ public class Plot extends JPanel {
         if (toolbar != null) {
             toolbar.add(Box.createHorizontalGlue());
             toolbar.add(c);
+        }
+    }
+
+    /**
+     * 在「存储图形」软盘图标<b>紧后方</b>插入一个导出图标按钮（与保存同类操作，逻辑更顺）。
+     * 区别于软盘的「弹出对话框另存为」，此按钮触发传入的动作（通常是无对话框的一键导出）。
+     */
+    public void addExportButton(String tooltip, java.awt.event.ActionListener action) {
+        if (toolbar != null && saveBtn != null) {
+            JButton b = new JButton(makeIcon(ICON_EXPORT));
+            b.setToolTipText(tooltip);
+            b.addActionListener(action);
+            int idx = toolbar.getComponentIndex(saveBtn);
+            toolbar.add(b, idx + 1);
         }
     }
 
@@ -814,6 +846,7 @@ public class Plot extends JPanel {
         Font lf = new Font(labelFont.getFamily(), Font.PLAIN, (int) legendFontPt);
         g2.setFont(lf);
         int lh = (int) (legendFontPt + 6);
+        boolean hasTitle = legendTitle != null && !legendTitle.trim().isEmpty();
         int n = 0, boxW = 0;
         for (Series s : series) {
             if (s.label == null) {
@@ -825,7 +858,14 @@ public class Plot extends JPanel {
                 boxW = tw;
             }
         }
-        int boxH = n * lh;
+        if (hasTitle) {
+            int tw = g2.getFontMetrics().stringWidth(legendTitle) + 6;
+            if (tw > boxW) {
+                boxW = tw;
+            }
+        }
+        int titleH = hasTitle ? lh : 0;
+        int boxH = n * lh + titleH;
         int ax, ay;
         switch (legendLoc) {
             case LEGEND_UPPER_RIGHT: ax = x1 - boxW - 10; ay = y0 + 10; break;
@@ -839,12 +879,18 @@ public class Plot extends JPanel {
             g2.setColor(Color.GRAY);
             g2.drawRect(ax - 4, ay - 4, boxW + 8, boxH + 8);
         }
+        if (hasTitle) {
+            g2.setFont(new Font(labelFont.getFamily(), Font.BOLD, (int) legendFontPt));
+            g2.setColor(Color.BLACK);
+            g2.drawString(legendTitle, ax, ay + (int) (lh * 0.7));
+            g2.setFont(lf);
+        }
         int i = 0;
         for (Series s : series) {
             if (s.label == null) {
                 continue;
             }
-            int cy = ay + i * lh + lh / 2;
+            int cy = ay + titleH + i * lh + lh / 2;
             if (s.type == LINE) {
                 g2.setColor(s.color);
                 g2.setStroke(new BasicStroke(1.6f));
@@ -853,7 +899,7 @@ public class Plot extends JPanel {
                 drawMarker(g2, ax + 10, cy, s.marker, s.hollow, s.markerSize, s.color, s.markerEdge);
             }
             g2.setColor(Color.BLACK);
-            g2.drawString(s.label, ax + 26, ay + i * lh + (int) (lh * 0.7));
+            g2.drawString(s.label, ax + 26, ay + titleH + i * lh + (int) (lh * 0.7));
             i++;
         }
     }
@@ -903,6 +949,38 @@ public class Plot extends JPanel {
     // 存储图形
     // ------------------------------------------------------------------
 
+    /** 恢复到初始（复原）坐标轴范围并立即重绘。批量导出前调用，保证导出的是全幅视图。 */
+    public void resetView() {
+        xMin = hxMin; xMax = hxMax; yMin = hyMin; yMax = hyMax;
+        mode = NONE;
+        canvas.repaint();
+    }
+
+    /** 将当前图形按 2× 高分辨率导出为 PNG 到指定文件（无对话框），供批量导出使用。 */
+    public void savePng(File f) throws Exception {
+        writePng(f);
+    }
+
+    /** 2× 高分辨率 PNG 写入（屏幕「存储图形」与批量导出共用）。 */
+    private void writePng(File f) throws Exception {
+        int scale = 2; // 高分辨率：屏幕尺寸的 2 倍
+        int w = canvas.getWidth() * scale;
+        int h = canvas.getHeight() * scale;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2 = img.createGraphics();
+        g2.scale(scale, scale);
+        canvas.drawPlot(g2, canvas.getWidth(), canvas.getHeight());
+        g2.dispose();
+        ImageIO.write(img, "png", f);
+    }
+
+    /** 矢量 SVG 写入。 */
+    private void writeSvg(File f) throws Exception {
+        SvgGraphics sg = new SvgGraphics(canvas.getWidth(), canvas.getHeight());
+        canvas.drawPlot(sg, canvas.getWidth(), canvas.getHeight());
+        Files.write(f.toPath(), sg.toSvg().getBytes("UTF-8"));
+    }
+
     /** 根据文件扩展名导出：.svg 为矢量图，其余按 2× 高分辨率 PNG 保存。 */
     private void savePlot() {
         JFileChooser fc = new JFileChooser();
@@ -914,7 +992,7 @@ public class Plot extends JPanel {
         FileNameExtensionFilter svgFilter = new FileNameExtensionFilter("SVG 矢量图 (*.svg)", "svg");
         fc.addChoosableFileFilter(pngFilter);
         fc.addChoosableFileFilter(svgFilter);
-        fc.setFileFilter(svgFilter);
+        fc.setFileFilter(pngFilter);
         fc.setAcceptAllFileFilterUsed(false);
         fc.setSelectedFile(new File("BeamPointing"));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
@@ -930,22 +1008,9 @@ public class Plot extends JPanel {
         }
         try {
             if (name.endsWith(".svg")) {
-                SvgGraphics sg = new SvgGraphics(canvas.getWidth(), canvas.getHeight());
-                canvas.drawPlot(sg, canvas.getWidth(), canvas.getHeight());
-                Files.write(f.toPath(), sg.toSvg().getBytes("UTF-8"));
+                writeSvg(f);
             } else {
-                if (!name.endsWith(".png")) {
-                    f = new File(f.getAbsolutePath() + ".png");
-                }
-                int scale = 2; // 高分辨率：屏幕尺寸的 2 倍
-                int w = canvas.getWidth() * scale;
-                int h = canvas.getHeight() * scale;
-                BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-                Graphics2D g2 = img.createGraphics();
-                g2.scale(scale, scale);
-                canvas.drawPlot(g2, canvas.getWidth(), canvas.getHeight());
-                g2.dispose();
-                ImageIO.write(img, "png", f);
+                writePng(f);
             }
             IJ.showStatus("图形已保存: " + f.getAbsolutePath());
         } catch (Exception ex) {

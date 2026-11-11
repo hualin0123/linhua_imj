@@ -35,17 +35,17 @@ public class BeamPointingTest {
     }
 
     private static double corrValid(double[] a, double[] b) throws Exception {
-        return (double) invoke(BeamPointingDiff_.class, "corrValid",
+        return (double) invoke(BeamPointingDiffRender.class, "corrValid",
                 new Class[]{double[].class, double[].class}, a, b);
     }
 
     private static double[] resample(double[] t, double[] v, double[] tg, double maxStep) throws Exception {
-        return (double[]) invoke(BeamPointingDiff_.class, "resample",
+        return (double[]) invoke(BeamPointingDiffRender.class, "resample",
                 new Class[]{double[].class, double[].class, double[].class, double.class}, t, v, tg, maxStep);
     }
 
     private static double nominalStep(double[] t, double gapFactor) throws Exception {
-        return (double) invoke(BeamPointingDiff_.class, "nominalStep",
+        return (double) invoke(BeamPointingDiffRender.class, "nominalStep",
                 new Class[]{double[].class, double.class}, t, gapFactor);
     }
 
